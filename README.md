@@ -1,0 +1,112 @@
+# Coordination — Nextcloud — 1.1.0
+
+Gestion des dossiers clients de CSM Taksit : attribution aux coordinateurs,
+appel et rendez-vous, collecte physique des pièces, puis contrôle Back-Office.
+Cette version prépare un usage fréquent sur smartphone.
+
+## Utilisation sur smartphone
+
+- Cartes dossiers avec le client, le téléphone, la localisation, le statut et le RDV.
+- Toucher le numéro ouvre l'application téléphone du smartphone.
+- Chargement par 15 dossiers, avec « Afficher les suivants ».
+- Fiches occupant l'écran disponible sous l'en-tête Nextcloud, actions en bas et
+  onglets pouvant défiler horizontalement.
+- Pièces en cartes français/arabe, grandes cases et progression des pièces obligatoires.
+- Une case n'est confirmée qu'après réponse du serveur ; un échec restaure son état
+  précédent et affiche l'erreur.
+- Avertissement avant fermeture ou changement d'onglet avec des champs non enregistrés.
+
+Une connexion est nécessaire. Cette version n'enregistre pas les formulaires
+hors ligne et ne les restaure pas après fermeture du navigateur.
+
+## Rôles et droits
+
+| Rôle | Groupe par défaut | Accès |
+| --- | --- | --- |
+| Administrateur Nextcloud | Administrateurs reconnus par Nextcloud | Tous les dossiers et le paramétrage |
+| Responsable | `csm_rcoordinateur` | Création, import, attribution, suivi, contrôle, suppression |
+| Coordinateur | `csm_coordinateur` | Ses dossiers attribués, pièces, rendez-vous et collecte |
+| Back-Office | `csm_backoffice` | Lecture des dossiers et contrôle des dossiers collectés |
+| Commercial | `callcrm_commercial`, `easycrm_commercial`, `csm_commercial` | Lecture des dossiers, sans écriture |
+
+La lecture par les commerciaux conserve le comportement de l'application reçue.
+Les groupes sont comparés exactement. Les anciens rapprochements par mots comme
+« resp » ou « office » ne donnent plus de droits. L'installation/mise à jour crée
+les trois groupes Coordination manquants ; elle n'y ajoute aucun utilisateur.
+
+Les administrateurs peuvent adapter les groupes via les valeurs Nextcloud
+`group_manager`, `group_coordinator`, `group_backoffice` et `group_sales` de l'app
+`coordination`. Chaque valeur accepte un identifiant ou un tableau JSON de chaînes,
+et remplace les groupes par défaut pour ce rôle. Voir le guide de déploiement.
+
+## Parcours d'un dossier
+
+1. Le responsable importe un XLSX ou crée le dossier, puis l'attribue.
+2. Le coordinateur vérifie les pièces et enregistre une date et une heure de RDV.
+3. Une fois les pièces obligatoires cochées, il transmet le dossier collecté au BO.
+4. Le Back-Office vérifie la conformité, puis valide après les contrôles obligatoires,
+   ou rejette avec un motif.
+5. Un dossier rejeté peut être corrigé puis présenté à nouveau. Les anciennes cases
+   de conformité Back-Office sont alors remises à zéro.
+
+Ces règles sont contrôlées sur le serveur. La suppression définitive est réservée
+au responsable et à l'administrateur.
+
+## Import Excel
+
+Format `.xlsx`, première feuille, première ligne = en-têtes. Exemple :
+
+| N° dossier | Nom du client | Numéro de téléphone | Adresse | Wilaya | Commune | Banque |
+| --- | --- | --- | --- | --- | --- | --- |
+| DOS-001 | Client Exemple | 0555000000 | Adresse exemple | 16 - Alger | Alger | Banque exemple |
+
+La colonne du nom est obligatoire ; une ligne sans nom est signalée. Un numéro de
+dossier vide est généré. Un numéro déjà présent est refusé à la création. Formater
+les téléphones en **texte dans Excel** pour conserver le zéro initial. Les colonnes
+supplémentaires sont conservées dans les données personnalisées.
+
+Limites : 10 Mo compressés, 2 000 lignes de données et 256 colonnes par fichier. Le lecteur refuse
+aussi plus de 200 entrées ZIP, une entrée décompressée supérieure à 16 Mo ou un total
+décompressé supérieur à 32 Mo. Un import peut réussir partiellement : le résultat
+indique le nombre créé et les erreurs. Ne pas réimporter les lignes déjà créées.
+
+## Installation et mise à jour
+
+L'identifiant et le dossier de l'application sont `coordination`. Le ZIP de livraison
+contient déjà ce dossier : extraire dans un répertoire de préparation, puis copier
+ses **contenus** dans l'emplacement de l'app. Ne pas créer
+`custom_apps/coordination/coordination/`.
+
+Consulter [docs/DEPLOIEMENT.md](docs/DEPLOIEMENT.md) pour la sauvegarde, les groupes,
+les commandes `occ` sous l'utilisateur Nextcloud et la recette mobile. L'ancien
+README mentionnait un dossier `Coordination` avec majuscule : vérifier l'installation
+réelle avant de modifier son emplacement.
+
+Le paquet déclare Nextcloud 25 à 36, comme la version reçue ; cette plage n'a pas été
+vérifiée sur chaque version. Utiliser la version de PHP requise par votre Nextcloud,
+avec `mbstring`, `zip` et `SimpleXML` pour l'import. Aucune compilation JavaScript ni
+dépendance Composer à installer.
+
+## Développement et vérifications
+
+```bash
+bash tests/run.sh
+# Ou avec un exécutable PHP particulier :
+PHP_BIN=/chemin/vers/php bash tests/run.sh
+```
+
+Les tests PHP nécessitent aussi PDO SQLite. Ils couvrent les autorisations et
+transitions, l'import de fichiers XLSX générés et l'annulation transactionnelle
+d'une création incomplète. Les tests navigateur nécessitent Python, Playwright
+et Chromium :
+
+```bash
+CHROMIUM_BIN=/chemin/vers/chromium python3 tests/browser-smoke.py /tmp/coord-previews
+```
+
+Neuf parcours vérifient les rôles coordinateur, BO et responsable à 360, 390 et
+1 280 pixels, avec une API de démonstration. Ils ne valident pas l'installation sur
+un serveur Nextcloud réel.
+
+Détails techniques et limites : [docs/REPRISE_IA.md](docs/REPRISE_IA.md).
+Historique des changements : [CHANGELOG.md](CHANGELOG.md).

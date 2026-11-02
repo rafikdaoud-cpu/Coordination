@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<info xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
+    <id>coordination</id>
+    <name>Coordination</name>
+    <summary>Gestion et suivi de dossiers avec workflow d'attribution, collecte client et validation Back-Office</summary>
+    <description><![CDATA[Application de Coordination pour Nextcloud (CSM Taksit) :
+- Import quotidien de listes de dossiers (.xlsx) et création manuelle
+- Attribution individuelle et par zone géographique (Wilayas d'Algérie)
+- Prise de rendez-vous client et récupération physique par le coordinateur
+- Checklist bilingue des pièces justificatives (Français / Arabe)
+- Contrôle de conformité et validation finale par le Back-Office
+- Suppression réservée aux responsables et administrateurs
+    ]]></description>
+    <version>1.1.0</version>
+    <namespace>Coordination</namespace>
+    <licence>agpl</licence>
+    <author>CSM Taksit / Antigravity</author>
+    <category>organization</category>
+    <category>office</category>
+    <bugs>https://cloud.csmtaksit.dz/</bugs>
+    <dependencies>
+        <nextcloud min-version="25" max-version="36" />
+    </dependencies>
+    <repair-steps>
+        <install><step>OCA\Coordination\Repair\CreateGroups</step></install>
+        <post-migration><step>OCA\Coordination\Repair\CreateGroups</step></post-migration>
+    </repair-steps>
+    <navigations>
+        <navigation>
+            <name>Coordination</name>
+            <route>coordination.page.index</route>
+            <icon>app.svg</icon>
+            <order>10</order>
+        </navigation>
+    </navigations>
+</info>
