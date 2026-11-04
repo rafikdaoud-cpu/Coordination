@@ -6,7 +6,7 @@
 (function () {
     'use strict';
 
-    const APP_VERSION = '1.5.0';
+    const APP_VERSION = '1.6.0';
     let initialized = false, dossierRequest = 0;
     let mutationBusy = false;
     let lastModalKey = '';
@@ -590,7 +590,7 @@
         const scanned = mandatory.filter(x => x.scan_count > 0).length;
         const step = beforeAppointment
             ? `<div class="co-step-banner is-blocked" role="note"><strong>Étape 1 : fixez d’abord le rendez-vous.</strong><span>Les pièces se scannent puis se valident une fois le RDV enregistré.</span><button type="button" class="co-btn co-btn-primary" data-goto-tab="appointment">📅 Prendre rendez-vous</button></div>`
-            : canCoord ? `<div class="co-step-banner" role="note"><strong>Étape 2 : pour chaque pièce, 📷 scannez puis ✅ validez.</strong><span>La case « Valider » s’active après l’envoi du scan.</span></div>` : '';
+            : canCoord ? `<div class="co-step-banner" role="note"><strong>Étape 2 : pour chaque pièce, 📷 scannez puis ✅ validez.</strong><span>Le mode guidé enchaîne les pièces : scan, vérification, « Valider et suivant ».</span>${checklist.some(x => !x.coordinator_checked) ? '<button type="button" class="co-btn co-btn-primary btn-guided-scan">📷 Scanner les pièces une par une</button>' : ''}</div>` : '';
         return `<div class="co-mobile-checklist">${step}
           <div class="co-checklist-progress" role="status">${showScans ? `📎 ${scanned} / ${mandatory.length} scannées · ` : ''}✅ ${done} / ${mandatory.length} ${canBO ? 'conformes' : 'validées'}</div>
           ${checklist.map(item => {
@@ -642,7 +642,7 @@
                     ${session.busy ? '<div class="co-scan-busy" role="status">⏳ Traitement…</div>' : ''}</div>
                 <label class="co-scan-option"><input type="checkbox" class="scan-doc-mode" ${state.scanDocMode ? 'checked' : ''}> Mode document (noir et blanc contrasté) pour les pages suivantes</label>
                 <div class="co-scan-actions">
-                    ${session.pages.length < 10 ? `<button type="button" class="co-btn co-btn-secondary btn-live-scan" data-item="${itemId}">➕ Page suivante</button>${fallbackInput}` : '<span class="co-scan-limit">10 pages maximum</span>'}
+                    ${session.pages.length < 10 ? `<button type="button" class="co-btn co-btn-secondary btn-live-page" data-item="${itemId}">➕ Page suivante</button>${fallbackInput}` : '<span class="co-scan-limit">10 pages maximum</span>'}
                     <button type="button" class="co-btn co-btn-success btn-scan-send" data-item="${itemId}" ${session.pages.length && !session.busy ? '' : 'disabled'}>✅ Envoyer le PDF (${session.pages.length} page${session.pages.length > 1 ? 's' : ''})</button>
                     <button type="button" class="co-btn co-btn-secondary btn-scan-cancel">Annuler</button>
                 </div></div>`;
@@ -1641,8 +1641,150 @@
         });
     }
 
+    /** Petit constructeur DOM : les libellés viennent de la base, jamais injectés en HTML. */
+    function h(tag, attrs, ...children) {
+        const e = document.createElement(tag);
+        Object.entries(attrs || {}).forEach(([k, v]) => { if (k === 'class') e.className = v; else if (k.startsWith('on')) e.addEventListener(k.slice(2), v); else if (v !== false && v != null) e.setAttribute(k, v === true ? '' : v); });
+        children.flat().forEach(c => { if (c != null) e.append(c instanceof Node ? c : document.createTextNode(String(c))); });
+        return e;
+    }
+
+    /**
+     * Mode guidé (smartphone) : pour chaque pièce non validée, dans l'ordre de la checklist,
+     * caméra → aperçu → « Valider et suivant » (envoi du PDF puis validation de la pièce)
+     * → pièce suivante, sans quitter l'écran caméra.
+     */
+    function startGuidedScan(startItemId) {
+        const fallback = (id) => document.querySelector(`#piece-${id} .scan-photo-input`)?.click();
+        if (!window.CoordinationDocScan || !window.CoordinationDocScan.supported()) { if (startItemId) fallback(startItemId); else feedback('Caméra indisponible : utilisez « 📷 Scanner » ou « 🖼️ Galerie ou PDF » sous chaque pièce.'); return; }
+        if (scanSession && scanSession.pages.length && !confirm('Abandonner les pages non envoyées ?')) return;
+        clearScanSession();
+        const dossierId = state.currentDossier.dossier.id;
+        const items = () => state.currentDossier.checklist || [];
+        const all = items().map(i => Number(i.id));
+        const startAt = Math.max(0, startItemId ? all.indexOf(startItemId) : all.findIndex(id => !items().find(i => Number(i.id) === id).coordinator_checked));
+        const queue = all.slice(startAt).concat(all.slice(0, startAt)).filter(id => !items().find(i => Number(i.id) === id).coordinator_checked);
+        if (!queue.length) { feedback('Toutes les pièces sont déjà validées.', false); return; }
+        let index = 0, pages = [], uploaded = false, busy = false, validated = 0;
+        const skipped = [];
+        const current = () => items().find(i => Number(i.id) === queue[index]);
+        const releasePages = () => { pages.forEach(p => URL.revokeObjectURL(p.preview)); pages = []; };
+
+        const scanner = window.CoordinationDocScan.open({
+            title: '', documentMode: state.scanDocMode, maxPages: 10,
+            onDocMode: (on) => { state.scanDocMode = on; },
+            onPage: async (canvas, documentMode) => {
+                pages.push(await window.CoordinationScan.canvasToPage(canvas, documentMode));
+                review();
+            },
+            onFallback: () => fallback(queue[index]),
+            onClose: async () => {
+                releasePages();
+                await openDossierDetail(dossierId);
+                if (validated || skipped.length) feedback(`${validated} pièce${validated > 1 ? 's' : ''} validée${validated > 1 ? 's' : ''} en mode guidé.` + (skipped.length ? ` ${skipped.length} pièce(s) passée(s) : à reprendre.` : ''), !!skipped.length);
+            },
+        });
+
+        function enter(i) {
+            index = i; uploaded = false; releasePages(); scanner.resetCount();
+            const item = current();
+            scanner.setTitle(`Pièce ${index + 1}/${queue.length} · ${item.document_label_fr}`);
+            if (item.scan_count > 0) existing(); else scanner.resume();
+        }
+
+        function next() {
+            if (index + 1 < queue.length) enter(index + 1); else finish();
+        }
+
+        async function refreshDetail() {
+            const res = await apiRequest(`api/dossiers?detail_id=${dossierId}`);
+            if (res.success) state.currentDossier = res.data;
+        }
+
+        /** Envoi du PDF (une seule fois) puis validation de la pièce ; réessayable. */
+        async function validateCurrent(withPages, message) {
+            if (busy) return;
+            busy = true; message.textContent = withPages ? '⏳ Envoi du PDF…' : '⏳ Validation…'; message.classList.remove('is-error');
+            const buttons = message.parentElement.querySelectorAll('button'); buttons.forEach(b => { b.disabled = true; });
+            try {
+                const item = current();
+                if (withPages && !uploaded) {
+                    const pdf = window.CoordinationScan.buildPdf(pages);
+                    const blob = new Blob([pdf], { type: 'application/pdf' });
+                    if (blob.size > state.scanMaxBytes) throw new Error(`PDF trop volumineux (${formatSize(blob.size)}) : retirez une page.`);
+                    const form = new FormData(); form.append('file', blob, scanFileName(Number(item.id)));
+                    const up = await apiRequest(`api/dossiers/${dossierId}/checklist/${item.id}/scans`, 'POST', form, true, 180000);
+                    if (!up.success) throw new Error(up.error || 'envoi impossible');
+                    uploaded = true;
+                }
+                message.textContent = '⏳ Validation de la pièce…';
+                const ok = await apiRequest(`api/dossiers/${dossierId}/checklist`, 'POST', { checklist_item_id: Number(item.id), role: 'coordinator', checked: true });
+                if (!ok.success) throw new Error(ok.error || 'validation impossible');
+                validated++;
+                if (navigator.vibrate) navigator.vibrate([30, 40, 30]);
+                await refreshDetail();
+                busy = false;
+                next();
+            } catch (err) {
+                busy = false;
+                buttons.forEach(b => { b.disabled = false; });
+                message.textContent = '⚠️ ' + (err.message || err) + (uploaded ? ' Le scan est déjà enregistré : réessayez la validation.' : ' Les pages restent prêtes : réessayez.');
+                message.classList.add('is-error');
+            }
+        }
+
+        function review() {
+            const item = current();
+            const last = index + 1 >= queue.length;
+            const message = h('p', { class: 'co-guided-msg', role: 'status', 'aria-live': 'polite' });
+            const thumbs = h('div', { class: 'co-guided-thumbs' }, pages.map((p, i) => h('figure', {},
+                h('img', { src: p.preview, alt: `Page ${i + 1}` }),
+                h('figcaption', {}, `Page ${i + 1}`),
+                h('button', { type: 'button', class: 'co-guided-del', 'aria-label': `Retirer la page ${i + 1}`, onclick: () => {
+                    const [removed] = pages.splice(i, 1); if (removed) URL.revokeObjectURL(removed.preview);
+                    uploaded = false;
+                    if (pages.length) review(); else { scanner.resetCount(); scanner.resume(); }
+                } }, '×'))));
+            scanner.showPanel(h('div', { class: 'co-guided' },
+                h('div', { class: 'co-guided-head' }, h('strong', {}, item.document_label_fr), h('span', {}, ` · ${pages.length} page${pages.length > 1 ? 's' : ''}`)),
+                item.document_label_ar ? h('div', { class: 'co-guided-ar', lang: 'ar', dir: 'rtl' }, item.document_label_ar) : null,
+                thumbs, message,
+                h('div', { class: 'co-guided-actions' },
+                    h('button', { type: 'button', class: 'co-guided-primary', onclick: () => validateCurrent(true, message) }, last ? '✅ Valider et terminer' : '✅ Valider et suivant'),
+                    pages.length < 10 ? h('button', { type: 'button', onclick: () => scanner.resume() }, '➕ Ajouter une page (verso)') : null,
+                    h('button', { type: 'button', onclick: () => { releasePages(); uploaded = false; scanner.resetCount(); scanner.resume(); } }, '↺ Reprendre la photo'),
+                    h('button', { type: 'button', class: 'co-guided-link', onclick: () => { skipped.push(item.id); next(); } }, 'Passer cette pièce'))));
+        }
+
+        function existing() {
+            const item = current();
+            const message = h('p', { class: 'co-guided-msg', role: 'status', 'aria-live': 'polite' });
+            scanner.showPanel(h('div', { class: 'co-guided' },
+                h('div', { class: 'co-guided-head' }, h('strong', {}, item.document_label_fr)),
+                h('p', {}, `Déjà scannée (${item.scan_count} scan${item.scan_count > 1 ? 's' : ''}), pas encore validée.`), message,
+                h('div', { class: 'co-guided-actions' },
+                    h('button', { type: 'button', class: 'co-guided-primary', onclick: () => validateCurrent(false, message) }, index + 1 >= queue.length ? '✅ Valider et terminer' : '✅ Valider et suivant'),
+                    h('button', { type: 'button', onclick: () => scanner.resume() }, '📷 Scanner à nouveau'),
+                    h('button', { type: 'button', class: 'co-guided-link', onclick: () => { skipped.push(item.id); next(); } }, 'Passer cette pièce'))));
+        }
+
+        function finish() {
+            const missing = items().filter(i => i.is_mandatory && !(i.coordinator_checked && i.scan_count > 0));
+            scanner.setTitle('Scan terminé');
+            scanner.showPanel(h('div', { class: 'co-guided' },
+                h('div', { class: 'co-guided-head' }, h('strong', {}, missing.length ? '⚠️ Pièces obligatoires restantes' : '✅ Toutes les pièces obligatoires sont scannées et validées')),
+                missing.length ? h('ul', { class: 'co-guided-missing' }, missing.map(i => h('li', {}, i.document_label_fr))) : h('p', {}, 'Vous pouvez transmettre le dossier au Back-Office.'),
+                h('div', { class: 'co-guided-actions' },
+                    h('button', { type: 'button', class: 'co-guided-primary', onclick: () => scanner.close() }, missing.length ? 'Fermer' : 'Fermer et transmettre au BO'))));
+        }
+
+        enter(0);
+    }
+
     function bindScanEvents() {
-        document.querySelectorAll('.btn-live-scan').forEach(btn => btn.addEventListener('click', (e) => openLiveScan(Number(e.currentTarget.getAttribute('data-item')))));
+        document.querySelectorAll('.btn-live-page').forEach(btn => btn.addEventListener('click', (e) => openLiveScan(Number(e.currentTarget.getAttribute('data-item')))));
+        document.querySelectorAll('.btn-live-scan').forEach(btn => btn.addEventListener('click', (e) => startGuidedScan(Number(e.currentTarget.getAttribute('data-item')))));
+        document.querySelector('.btn-guided-scan')?.addEventListener('click', () => startGuidedScan(null));
         document.querySelectorAll('.scan-photo-input').forEach(input => input.addEventListener('change', async (e) => {
             const files = Array.from(e.target.files || []);
             const itemId = Number(e.target.getAttribute('data-item'));

@@ -1,4 +1,4 @@
-# Coordination — Nextcloud — 1.5.0
+# Coordination — Nextcloud — 1.6.0
 
 Gestion des dossiers clients de CSM Taksit : attribution aux coordinateurs,
 appel et rendez-vous, collecte physique des pièces, puis contrôle Back-Office.
@@ -38,6 +38,9 @@ La fiche guide le coordinateur, sur smartphone d'abord, dans cet ordre imposé p
    attendant, une détection rapide intégrée fonctionne déjà (feuille sur fond sombre). Les photos sont
    réduites et assemblées en PDF A4 sur le téléphone (environ 250 à 500 Ko par page).
    **🖼️ Galerie ou PDF** accepte des photos existantes ou un PDF d'une application de scan.
+   **Mode guidé** (recommandé sur smartphone) : « 📷 Scanner les pièces une par une »
+   enchaîne toutes les pièces sans quitter la caméra : photo automatique, aperçu,
+   **✅ Valider et suivant** (le PDF est envoyé et la pièce validée), pièce suivante…
 3. **② Pièces — valider** : la case « Validée par le coordinateur » ne s'active
    qu'après l'envoi du scan de la pièce. Supprimer le dernier scan d'une pièce validée
    la remet « à vérifier ».
@@ -144,6 +147,7 @@ et Chromium :
 
 ```bash
 CHROMIUM_BIN=/chemin/vers/chromium python3 tests/browser-smoke.py /tmp/coord-previews
+CHROMIUM_BIN=/chemin/vers/chromium python3 tests/browser-opencv.py
 ```
 
 Neuf parcours vérifient les rôles coordinateur, BO et responsable à 360, 390 et

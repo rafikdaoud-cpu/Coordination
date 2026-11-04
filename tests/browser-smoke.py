@@ -92,25 +92,9 @@ with sync_playwright() as p:
     page.locator('#modal-app-date').fill('2026-11-03');page.locator('#modal-app-time').fill('10:00')
     page.locator('#btn-save-appointment').click()
     page.wait_for_function("document.querySelector('.co-tab.active[data-modal-tab=checklist]') && document.querySelector('.co-step-banner')?.textContent.includes('Étape 2')")
-    # Étape 2 : scanner puis valider
+    # Étape 2 (repli, appareil photo natif et galerie) : la case reste bloquée tant que la pièce n'est pas scannée.
     assert page.locator('#piece-1 [data-role=coordinator]').is_disabled(),'piece can be validated before its scan'
     assert page.locator('#btn-action-collected').is_disabled()
-    # Scanner en direct : la fausse caméra montre une feuille inclinée, la photo doit partir seule.
-    page.locator('#piece-1 .btn-live-scan').click();page.locator('.co-docscan').wait_for()
-    # Auto coupé pendant le chargement d'OpenCV, puis réactivé : la prise doit venir du moteur OpenCV.
-    page.locator('.co-docscan-bottom .co-docscan-chip').click()
-    t0=page.evaluate('performance.now()')
-    page.wait_for_function("document.querySelector('.co-docscan-engine')?.textContent==='Détection OpenCV'",timeout=60000)
-    print(f'   OpenCV prêt en {(page.evaluate("performance.now()")-t0)/1000:.1f} s')
-    assert page.locator('.co-docscan-count').inner_text()=='','manual mode must not capture'
-    page.locator('.co-docscan-bottom .co-docscan-chip').click()
-    page.wait_for_function("document.querySelector('.co-docscan-count')?.textContent.includes('1 page')",timeout=30000)
-    assert page.locator('.co-docscan-shutter').evaluate('e=>{const r=e.getBoundingClientRect();return r.width>=64&&r.bottom<=innerHeight}'),'shutter not reachable'
-    page.screenshot(path=str(out/f'{role}-{width}-live.png'),full_page=False)
-    page.locator('.co-docscan-done').click();page.wait_for_function("!document.querySelector('.co-docscan') && document.querySelectorAll('#piece-1 .co-scan-thumbs img').length===1")
-    dims=page.locator('#piece-1 .co-scan-thumbs img').evaluate('i=>i.decode().then(()=>[i.naturalWidth,i.naturalHeight])')
-    assert dims[1]>dims[0] and 1.0<dims[1]/dims[0]<1.35,('sheet not straightened to its own shape',dims)
-    page.locator('.btn-scan-cancel').click();page.wait_for_function("!document.querySelector('#piece-1 .co-scan-session')")
     page.locator('#piece-1 .scan-photo-input').set_input_files([{'name':'photo1.jpg','mimeType':'image/jpeg','buffer':PHOTO}])
     page.locator('#piece-1 .co-scan-thumbs img').first.wait_for()
     page.locator('#piece-1 .scan-photo-input').set_input_files([{'name':'photo2.jpg','mimeType':'image/jpeg','buffer':PHOTO}])
@@ -123,17 +107,32 @@ with sync_playwright() as p:
     up=page.evaluate('window.fixture.uploads[0]')
     assert up['head']=='%PDF-' and up['name'].endswith('_cni.pdf') and up['size']>1000,up
     assert page.locator('#piece-1 .co-scan-row a[download]').get_attribute('href').endswith('/scans/51/file?download=1')
-    assert 'Cochez' in page.locator('.co-feedback:visible').last.inner_text(),'no validation hint after scan'
     page.evaluate('window.fixture.failWrite=true');page.locator('#piece-1 [data-role=coordinator]').click()
     page.wait_for_function("!document.querySelector('#piece-1 [data-role=coordinator]').checked && document.querySelector('.co-feedback:not([hidden])')?.textContent.includes('interrompue')")
-    page.locator('#piece-1 [data-role=coordinator]').check()
-    page.wait_for_function("document.querySelector('.co-checklist-progress').textContent.includes('✅ 1 / 2')")
-    assert page.locator('#btn-action-collected').is_disabled(),'collection allowed with a piece neither scanned nor validated'
     page.locator('#piece-2 .scan-pick-input').set_input_files([{'name':'residence.pdf','mimeType':'application/pdf','buffer':b'%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n'}])
     page.wait_for_function("!document.querySelector('#piece-2 [data-role=coordinator]').disabled")
     assert page.evaluate('window.fixture.uploads[1].name')=='residence.pdf'
-    page.locator('#piece-2 [data-role=coordinator]').check()
-    page.wait_for_function("document.querySelector('.co-checklist-progress').textContent.includes('📎 2 / 2') && document.querySelector('.co-checklist-progress').textContent.includes('✅ 2 / 2')")
+    # Mode guidé : pièce 1 (déjà scannée) rescannée à la caméra, validée, puis pièce 2 validée, sans quitter la caméra.
+    page.locator('.btn-guided-scan').click();page.locator('.co-docscan').wait_for()
+    assert page.locator('.co-docscan-title-text').inner_text().startswith('Pièce 1/2')
+    page.get_by_role('button',name='📷 Scanner à nouveau').click()
+    page.locator('.co-docscan-bottom .co-docscan-chip').click()  # Auto coupé le temps qu'OpenCV se charge
+    t0=page.evaluate('performance.now()')
+    page.wait_for_function("document.querySelector('.co-docscan-engine')?.textContent==='Détection OpenCV'",timeout=60000)
+    print(f'   OpenCV prêt en {(page.evaluate("performance.now()")-t0)/1000:.1f} s')
+    page.locator('.co-docscan-bottom .co-docscan-chip').click()
+    page.locator('.co-docscan-panel .co-guided-thumbs img').wait_for(timeout=30000)
+    dims=page.locator('.co-docscan-panel .co-guided-thumbs img').evaluate('i=>i.decode().then(()=>[i.naturalWidth,i.naturalHeight])')
+    assert dims[1]>dims[0] and 1.0<dims[1]/dims[0]<1.35,('sheet not straightened to its own shape',dims)
+    assert page.locator('.co-guided-primary').evaluate('e=>{const r=e.getBoundingClientRect();return r.height>=50&&r.bottom<=innerHeight}'),'validate button not reachable'
+    page.screenshot(path=str(out/f'{role}-{width}-guided.png'),full_page=False)
+    page.get_by_role('button',name='✅ Valider et suivant').click()
+    page.wait_for_function("document.querySelector('.co-docscan-title-text')?.textContent.startsWith('Pièce 2/2')")
+    assert page.evaluate('window.fixture.uploads.length')==3 and page.evaluate('window.fixture.uploads[2].head')=='%PDF-'
+    page.get_by_role('button',name='✅ Valider et terminer').click()
+    page.wait_for_function("document.querySelector('.co-docscan-panel')?.textContent.includes('Toutes les pièces obligatoires')")
+    page.get_by_role('button',name='Fermer et transmettre au BO').click()
+    page.wait_for_function("!document.querySelector('.co-docscan') && document.querySelector('.co-checklist-progress')?.textContent.includes('✅ 2 / 2')")
     page.locator('.co-modal-body').evaluate('e=>e.scrollTop=0')
     page.screenshot(path=str(out/f'{role}-{width}-checklist.png'),full_page=False)
     page.locator('#btn-action-collected').click()

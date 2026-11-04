@@ -1,4 +1,4 @@
-# Reprise technique — Coordination 1.5.0
+# Reprise technique — Coordination 1.6.0
 
 ## Demande et périmètre
 
@@ -113,6 +113,16 @@ de démonstration.
 Il n'y a pas eu d'essai intégré sur le Nextcloud du VPS, de test Safari/iOS, ni de
 charge multiutilisateur. La plage déclarée Nextcloud 25–36 provient de l'archive
 et n'est pas une certification de cette matrice.
+
+## Version 1.6.0 : mode guidé et diagnostic OpenCV
+
+`startGuidedScan()` (js/app.js) pilote `CoordinationDocScan.open()` via son API
+(`pause`, `resume`, `showPanel`, `setTitle`, `resetCount`) : file des pièces non
+validées dans l'ordre de la checklist, panneau de vérification construit avec `h()`
+(textContent, jamais d'HTML), envoi du PDF puis `POST checklist` ; `uploaded` évite un
+second envoi lors d'une nouvelle tentative. `loadOpenCV()` rejette avec un message
+lisible (CSP via `securitypolicyviolation`, HTTP via `HEAD`, délai 120 s) affiché dans
+l'écran caméra. `opencvUrl()` part de `document.currentScript.src` de docscan.js.
 
 ## Version 1.5.0 : détection OpenCV (option B)
 

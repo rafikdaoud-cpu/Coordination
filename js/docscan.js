@@ -13,6 +13,9 @@
 (function (root) {
     'use strict';
 
+    // Adresse de ce fichier, pour trouver js/vendor/opencv.js à côté, quel que soit le dossier d'apps.
+    const SELF_SRC = (typeof document !== 'undefined' && document.currentScript && document.currentScript.src) || '';
+
     const DETECT_SIDE = 320;     // px de l'image d'analyse (détecteur rapide)
     const CV_DETECT_SIDE = 480;  // px de l'image d'analyse (OpenCV)
     const DETECT_EVERY = 100;    // ms entre deux analyses
@@ -245,20 +248,43 @@
     }
 
     let enginePromise = null;
-    /** Charge opencv.js une seule fois ; résout { cv }, ou rejette (réseau, CSP, mémoire). */
+    /**
+     * Charge opencv.js une seule fois ; résout { cv }, ou rejette avec un message lisible
+     * (fichier introuvable, blocage de sécurité CSP, délai, initialisation).
+     */
     function loadOpenCV(url) {
         if (enginePromise) return enginePromise;
         enginePromise = new Promise((resolve, reject) => {
             if (root.cv && root.cv.Mat) { resolve({ cv: root.cv }); return; }
+            const violations = [];
+            const onViolation = (e) => { violations.push(e.violatedDirective || e.effectiveDirective || 'CSP'); };
+            document.addEventListener('securitypolicyviolation', onViolation);
             const savedDefine = root.define; // une page avec AMD empêcherait opencv.js de publier window.cv
             root.define = undefined;
             const script = document.createElement('script');
             script.src = url; script.async = true;
-            const timeout = setTimeout(() => reject(new Error('Chargement OpenCV trop long')), 90000);
-            script.onerror = () => { clearTimeout(timeout); root.define = savedDefine; reject(new Error('OpenCV introuvable')); };
+            const done = (err, value) => {
+                clearTimeout(timeout); document.removeEventListener('securitypolicyviolation', onViolation);
+                root.removeEventListener('error', onGlobalError);
+                if (err) reject(err); else resolve(value);
+            };
+            const csp = () => violations.length ? new Error('bloqué par la sécurité du serveur (CSP ' + violations[0] + ')') : null;
+            const onGlobalError = (e) => { if (e.filename && e.filename.indexOf('opencv') !== -1) setTimeout(() => done(csp() || new Error('erreur au démarrage : ' + (e.message || 'inconnue'))), 0); };
+            root.addEventListener('error', onGlobalError);
+            const timeout = setTimeout(() => done(csp() || new Error('délai dépassé (réseau lent ?)')), 120000);
+            script.onerror = () => {
+                root.define = savedDefine;
+                fetch(url, { method: 'HEAD', credentials: 'same-origin' })
+                    .then(r => done(csp() || new Error(r.ok ? 'chargement refusé par le navigateur' : 'fichier introuvable (HTTP ' + r.status + ')')))
+                    .catch(() => done(csp() || new Error('fichier inaccessible')));
+            };
             script.onload = () => {
                 root.define = savedDefine;
-                whenReady(root.cv).then((wrapped) => { clearTimeout(timeout); resolve(wrapped); }, (err) => { clearTimeout(timeout); reject(err); });
+                // Les rapports CSP arrivent après coup : on leur laisse un instant avant de conclure.
+                if (!root.cv) { setTimeout(() => done(csp() || new Error('module non publié')), 400); return; }
+                whenReady(root.cv).then((wrapped) => done(null, wrapped), (err) => done(csp() || err));
+                // Si la compilation WASM est bloquée, onRuntimeInitialized n'arrive jamais : on surveille la CSP.
+                setTimeout(() => { if (violations.length) done(csp()); }, 3000);
             };
             document.head.appendChild(script);
         });
@@ -269,7 +295,10 @@
     function opencvUrl() {
         const cfg = root.CoordinationDocScanConfig || {};
         if (cfg.opencvUrl !== undefined) return cfg.opencvUrl;
-        return root.OC && OC.linkTo ? OC.linkTo('coordination', 'js/vendor/opencv.js') : null;
+        if (SELF_SRC && /\/js\/docscan\.js(\?|$)/.test(SELF_SRC)) return SELF_SRC.replace(/\/js\/docscan\.js(\?.*)?$/, '/js/vendor/opencv.js');
+        if (root.OC && OC.appswebroots && OC.appswebroots.coordination) return OC.appswebroots.coordination + '/js/vendor/opencv.js';
+        if (root.OC && OC.linkTo) return OC.linkTo('coordination', 'js/vendor/opencv.js');
+        return null;
     }
 
     /** Coins [[x,y]×4] (HG, HD, BD, BG) de la feuille dans l'image grise, ou null. */
@@ -369,13 +398,15 @@
         let stream = null, timer = 0, closed = false, capturing = false, count = 0;
         let auto = true, docMode = !!opts.documentMode;
         let lastQuad = null, stable = 0, armed = true, lostFrames = 0, capturedQuad = null;
-        let cv = null, engineState = 'light';
+        let cv = null, engineState = 'light', engineError = '';
         const url = opencvUrl();
 
         const overlay = el('div', 'co-docscan');
         overlay.setAttribute('role', 'dialog'); overlay.setAttribute('aria-modal', 'true'); overlay.setAttribute('aria-label', 'Scanner de document');
         const top = el('div', 'co-docscan-top');
-        const title = el('div', 'co-docscan-title', opts.title || 'Scan');
+        const title = el('div', 'co-docscan-title');
+        const titleText = el('span', 'co-docscan-title-text', opts.title || 'Scan');
+        title.appendChild(titleText);
         const counter = el('span', 'co-docscan-count', '');
         title.appendChild(counter);
         const docBtn = el('button', 'co-docscan-chip', ''); docBtn.type = 'button';
@@ -391,7 +422,10 @@
         const hint = el('div', 'co-docscan-hint', 'Ouverture de la caméra…'); hint.setAttribute('role', 'status'); hint.setAttribute('aria-live', 'polite');
         const flash = el('div', 'co-docscan-flash');
         const error = el('div', 'co-docscan-error'); error.hidden = true;
-        stage.append(video, canvas, hint, flash, error);
+        // Panneau de vérification (mode guidé) : aperçu, valider, suivant… posé sur la caméra.
+        const panel = el('div', 'co-docscan-panel'); panel.hidden = true;
+        stage.append(video, canvas, hint, flash, error, panel);
+        let paused = false;
 
         const bottom = el('div', 'co-docscan-bottom');
         const autoBtn = el('button', 'co-docscan-chip', ''); autoBtn.type = 'button';
@@ -404,7 +438,8 @@
         const detectCtx = detectCanvas.getContext('2d', { willReadFrequently: true });
 
         const refreshButtons = () => {
-            engineTag.textContent = engineState === 'opencv' ? 'Détection OpenCV' : engineState === 'loading' ? 'Détection rapide · chargement OpenCV…' : 'Détection rapide';
+            engineTag.textContent = engineState === 'opencv' ? 'Détection OpenCV' : engineState === 'loading' ? 'Détection rapide · chargement OpenCV…'
+                : engineError ? 'Détection rapide · OpenCV ' + engineError : 'Détection rapide';
             counter.textContent = count ? ` · ${count} page${count > 1 ? 's' : ''}` : '';
             docBtn.textContent = docMode ? '◐ N&B : oui' : '◐ N&B : non';
             docBtn.setAttribute('aria-pressed', String(docMode));
@@ -459,10 +494,11 @@
             try { await video.play(); } catch (e) { /* lecture auto déjà en cours */ }
             refreshButtons();
             timer = setInterval(tick, DETECT_EVERY);
+            if (!url && !engineError) { engineError = 'introuvable (adresse inconnue)'; refreshButtons(); }
             if (url && !cv && engineState !== 'loading') {
                 engineState = 'loading'; refreshButtons();
                 loadOpenCV(url).then((lib) => { if (closed) return; cv = lib.cv; engineState = 'opencv'; stable = 0; lastQuad = null; refreshButtons(); })
-                    .catch((err) => { console.warn('OpenCV indisponible, détection rapide conservée :', err); engineState = 'light'; refreshButtons(); });
+                    .catch((err) => { console.warn('OpenCV indisponible, détection rapide conservée :', err); engineState = 'light'; engineError = err && err.message ? err.message : 'indisponible'; refreshButtons(); });
             }
         }
 
@@ -473,6 +509,7 @@
         }
 
         function draw(quad, progress) {
+            if (!video.videoWidth) return;
             const dpr = root.devicePixelRatio || 1;
             const r = videoRect();
             if (canvas.width !== Math.round(r.cw * dpr) || canvas.height !== Math.round(r.ch * dpr)) { canvas.width = Math.round(r.cw * dpr); canvas.height = Math.round(r.ch * dpr); }
@@ -497,7 +534,7 @@
         }
 
         function tick() {
-            if (closed || capturing || !video.videoWidth) return;
+            if (closed || capturing || paused || !video.videoWidth) return;
             const k = (cv ? CV_DETECT_SIDE : DETECT_SIDE) / Math.max(video.videoWidth, video.videoHeight);
             const w = Math.round(video.videoWidth * k), h = Math.round(video.videoHeight * k);
             if (detectCanvas.width !== w || detectCanvas.height !== h) { detectCanvas.width = w; detectCanvas.height = h; }
@@ -581,8 +618,21 @@
         refreshButtons();
         closeBtn.focus();
         start();
-        return { close };
+        return {
+            close,
+            /** Suspend l'analyse (la vidéo continue : la reprise est immédiate). */
+            pause() { paused = true; draw(null, 0); },
+            resume() {
+                paused = false; stable = 0; lastQuad = null; capturedQuad = null; armed = true;
+                panel.hidden = true; panel.replaceChildren(); hint.hidden = false; bottom.hidden = false;
+                refreshButtons();
+            },
+            setTitle(text) { titleText.textContent = text; },
+            resetCount() { count = 0; refreshButtons(); },
+            showPanel(node) { paused = true; draw(null, 0); panel.replaceChildren(node); panel.hidden = false; hint.hidden = true; bottom.hidden = true; },
+            isClosed() { return closed; },
+        };
     }
 
-    root.CoordinationDocScan = { supported, open, detectQuad, detectQuadCV, loadOpenCV, whenReady, orderCorners, validQuad, homography, applyH, warpPixels, outputSize, toGray, DETECT_SIDE };
+    root.CoordinationDocScan = { supported, open, opencvUrl, detectQuad, detectQuadCV, loadOpenCV, whenReady, orderCorners, validQuad, homography, applyH, warpPixels, outputSize, toGray, DETECT_SIDE };
 })(typeof window !== 'undefined' ? window : globalThis);

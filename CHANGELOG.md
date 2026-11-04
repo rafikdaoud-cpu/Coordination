@@ -1,5 +1,27 @@
 # Changements
 
+## 1.6.0 — 2026-11-04
+
+### Mode guidé sur smartphone : scan → valider → suivant
+
+- Bouton « 📷 Scanner les pièces une par une » (étape 2) ; « 📷 Scanner » sous une pièce
+  lance le même parcours à partir de cette pièce.
+- Sans quitter la caméra : photo automatique, aperçu, puis **✅ Valider et suivant**
+  (envoi du PDF et validation de la pièce), pièce suivante ; « ➕ Ajouter une page
+  (verso) », « ↺ Reprendre la photo », « Passer cette pièce ».
+- Pièce déjà scannée mais non validée : « Valider et suivant » ou « Scanner à nouveau ».
+- Fin de parcours : liste des pièces obligatoires restantes, ou invitation à transmettre.
+- Erreur réseau : pages conservées, nouvelle tentative sans renvoyer un PDF déjà reçu.
+
+### OpenCV : diagnostic et chargement
+
+- Adresse d'`opencv.js` déduite de celle de `docscan.js` (fonctionne quel que soit le
+  dossier d'apps), avec repli sur `OC.appswebroots` puis `OC.linkTo`.
+- La raison d'un échec s'affiche sous le titre de la caméra : « bloqué par la sécurité
+  du serveur (CSP …) », « fichier introuvable (HTTP 404) », « délai dépassé »…
+- Test `tests/browser-opencv.py` : adresse, chargement, CSP refusant eval, fichier absent.
+
+
 ## 1.5.0 — 2026-11-04
 
 ### Scanner : détection OpenCV (option B)
