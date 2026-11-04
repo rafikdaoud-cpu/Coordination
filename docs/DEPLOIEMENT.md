@@ -1,4 +1,4 @@
-# Installation / mise à jour de Coordination 1.1.0
+# Installation / mise à jour de Coordination 1.6.0
 
 Ce document décrit une opération à réaliser après sauvegarde et recette. La
 préparation du paquet n'a exécuté aucune commande sur le VPS. Les exemples utilisent
@@ -21,7 +21,12 @@ minuscules, comme son identifiant Nextcloud. L'ancien README mentionnait
 un doute sur le chemin. Identifier d'abord le dossier réellement chargé.
 
 Le PHP CLI doit être la version adaptée au Nextcloud installé. Vérifier aussi les
-extensions de ce PHP **et du PHP web** : `mbstring`, `zip`, `SimpleXML`. Si
+extensions de ce PHP **et du PHP web** : `mbstring`, `zip`, `SimpleXML`.
+
+Les scans PDF (1.2.0) sont plafonnés à 20 Mo par l'application. Le PHP web doit
+accepter au moins cette taille : vérifier `upload_max_filesize` et `post_max_size`
+(Nextcloud les fixe en général à 512 Mo dans `.user.ini`) et la limite du proxy
+(`client_max_body_size` pour nginx). Un scan de 3 pages fait d'ordinaire 0,5 à 1,5 Mo. Si
 `needsDbUpgrade` est déjà vrai, ou si une autre mise à jour échoue, résoudre cette
 situation avant de remplacer Coordination. Une erreur Call CRM n'est pas corrigée
 par ce paquet.
@@ -37,9 +42,19 @@ Extraire le ZIP dans un répertoire temporaire. Il contient un répertoire
 Ne pas extraire directement au hasard dans le dossier existant.
 
 Les tables restent `coord_dossiers`, `coord_checklists`, `coord_histories`,
-`coord_configs`, avec le préfixe de votre Nextcloud. Il n'y a pas de nouvelle
-migration de schéma. Ne pas désinstaller/réinstaller l'application pour appliquer
-cette mise à jour, ni supprimer ces tables.
+`coord_configs`, avec le préfixe de votre Nextcloud. La version 1.2.0 contient une
+migration **additive** (`Version1200Date20261104120000`) appliquée par `occ upgrade` :
+colonne `revision` (défaut 0) dans `coord_dossiers` et nouvelle table `coord_scans`.
+Aucune donnée existante n'est modifiée. Ne pas désinstaller/réinstaller l'application
+pour appliquer cette mise à jour, ni supprimer ces tables.
+
+Les fichiers PDF sont rangés dans les données privées de l'application :
+`<datadirectory>/appdata_<instanceid>/coordination/scans-d<ID>/`. Ils ne sont pas
+visibles dans l'application Fichiers. **Inclure le répertoire de données Nextcloud
+dans la sauvegarde**, en plus de la base : la table `coord_scans` seule ne contient
+que les métadonnées. Ces documents (pièces d'identité, justificatifs) sont des
+données personnelles : chiffrement du disque/sauvegarde et durée de conservation
+sont à définir avec le responsable.
 
 ## 3. Préparer les groupes
 
@@ -65,6 +80,10 @@ banques/champs/pièces sont dans la table métier `coord_configs`.
 
 L'étape d'installation/mise à jour crée les groupes Coordination par défaut
 manquants, même avec un mapping personnalisé, sans y ajouter d'utilisateurs.
+
+Depuis 1.3.0, le scan de chaque pièce est systématique (parcours RDV → scan →
+validation) : la clé `scan_required` de 1.2.0 n'est plus lue et peut être supprimée
+(`occ config:app:delete coordination scan_required`).
 
 ## 4. Remplacer les fichiers et appliquer la version
 
@@ -120,6 +139,30 @@ Utiliser des dossiers fictifs et trois comptes distincts.
    Nextcloud, défilement, orientation et actions basses accessibles.
 7. Commercial en lecture seule, utilisateur sans groupe refusé, tentative d'accès
    au dossier d'un autre coordinateur refusée.
+8. Parcours : sur le téléphone du coordinateur, vérifier qu'avant le RDV aucune
+   pièce ne se scanne ni ne se valide ; enregistrer le RDV ; « 📷 Scanner »,
+   poser la pièce sur un fond sombre : la photo doit partir seule et la page être
+   redressée ; retourner pour le verso ; « Terminer », « Envoyer le PDF », valider la
+   pièce ; transmettre. Refuser la caméra une fois : l'appareil photo natif doit prendre
+   le relais. Tester sur fond clair, sous éclairage faible et avec une carte plastifiée
+   pour comparer : sous le titre de l'écran caméra, « Détection OpenCV » doit apparaître
+   quelques secondes après l'ouverture (premier scan : ≈ 10 Mo à télécharger en 4G).
+   S'il reste « Détection rapide », la raison s'affiche juste après (« OpenCV bloqué par
+   la sécurité du serveur (CSP …) », « fichier introuvable (HTTP 404) », « délai dépassé »).
+   Vérifier aussi que le fichier est servi :
+   `curl -sI https://<votre-nextcloud>/custom_apps/coordination/js/vendor/opencv.js`
+   (attendu : `HTTP/2 200` et `content-length: 10378215`, ou une taille compressée).
+
+Le fichier `js/vendor/opencv.js` (10,4 Mo) est un fichier statique : la compression
+gzip/brotli du serveur web (nginx `gzip_types application/javascript`) réduit nettement
+le premier téléchargement. Vérifier l'autorisation caméra, la
+   rotation des photos, la lisibilité du PDF et la durée d'envoi en 4G. Essayer aussi
+   « Galerie ou PDF » avec un PDF produit par l'application scanner du téléphone.
+9. BO : « Voir » ouvre le PDF dans un nouvel onglet, « Télécharger » l'enregistre.
+   Un commercial et un autre coordinateur ne voient pas les scans (l'URL directe
+   répond 404). Après collecte, le coordinateur ne peut plus ajouter ni supprimer.
+10. Deux sessions sur le même dossier : la seconde modification de la fiche ou la
+   seconde décision BO est refusée avec « modifié entre-temps » ; recharger la fiche.
 
 Les essais Chromium livrés ne simulent ni le CSS complet de Nextcloud ni Safari.
 
@@ -128,6 +171,8 @@ Les essais Chromium livrés ne simulent ni le CSS complet de Nextcloud ni Safari
 Conserver les sauvegardes du code et de la base prises au même instant. Si la
 recette échoue, effectuer la restauration avec la procédure Nextcloud habituelle,
 en maintenance et sous contrôle de l'administrateur. Ne pas remettre seulement
-un numéro de version inférieur en base. Le paquet 1.1.0 n'ajoute aucune colonne,
-mais les écritures effectuées après mise à jour doivent être prises en compte
-avant toute restauration.
+un numéro de version inférieur en base. La migration 1.2.0 est additive, mais le
+code 1.1.0 ne sait pas lire la nouvelle colonne `revision` de ses entités : restaurer
+donc le code **et** la base ensemble, jamais le code seul. Les
+scans et écritures effectués après mise à jour doivent être pris en compte avant
+toute restauration.

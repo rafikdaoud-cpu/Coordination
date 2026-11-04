@@ -67,6 +67,7 @@ class ConfigApiController extends Controller {
             'document_templates' => $this->dossierService->getDocumentTemplates(),
             'custom_fields' => $this->dossierService->getCustomFields(),
             'banks' => $this->dossierService->getBanks(),
+            'scan_max_bytes' => \OCA\Coordination\Service\ScanService::MAX_BYTES,
         ]);
     }
 
@@ -75,14 +76,16 @@ class ConfigApiController extends Controller {
      */
     public function saveBanks(): JSONResponse {
         if (!$this->isManager()) {
-            return new JSONResponse(['success' => false, 'error' => 'Paramétrage réservé aux responsables et administrateurs']);
+            return new JSONResponse(['success' => false, 'error' => 'Paramétrage réservé aux responsables et administrateurs'], 403);
         }
 
         $banks = $this->request->getParam('banks', []);
         $clean = [];
         if (is_array($banks)) {
+            if (count($banks) > 200) return new JSONResponse(['success'=>false,'error'=>'200 banques maximum.'],400);
             foreach ($banks as $bank) {
-                $name = trim((string)$bank);
+                if (!is_string($bank) || mb_strlen($bank) > 120) return new JSONResponse(['success'=>false,'error'=>'Nom de banque invalide (120 caractères maximum).'],400);
+                $name = trim($bank);
                 if ($name !== '' && !in_array($name, $clean, true)) {
                     $clean[] = $name;
                 }
@@ -102,10 +105,12 @@ class ConfigApiController extends Controller {
      */
     public function saveCustomFields(): JSONResponse {
         if (!$this->isManager()) {
-            return new JSONResponse(['success' => false, 'error' => 'Paramétrage réservé aux responsables et administrateurs']);
+            return new JSONResponse(['success' => false, 'error' => 'Paramétrage réservé aux responsables et administrateurs'], 403);
         }
 
         $fields = $this->request->getParam('custom_fields', []);
+        $json = json_encode($fields, JSON_UNESCAPED_UNICODE);
+        if (!is_array($fields) || count($fields) > 50 || $json === false || strlen($json) > 65536) return new JSONResponse(['success'=>false,'error'=>'Champs personnalisés invalides (50 maximum).'],400);
         $this->configMapper->setValue('custom_fields', json_encode($fields, JSON_UNESCAPED_UNICODE));
         return new JSONResponse(['success' => true]);
     }
@@ -115,7 +120,7 @@ class ConfigApiController extends Controller {
      */
     public function saveDocumentTemplates(): JSONResponse {
         if (!$this->isManager()) {
-            return new JSONResponse(['success' => false, 'error' => 'Paramétrage réservé aux responsables et administrateurs']);
+            return new JSONResponse(['success' => false, 'error' => 'Paramétrage réservé aux responsables et administrateurs'], 403);
         }
 
         $templates = $this->request->getParam('document_templates', []);

@@ -687,3 +687,105 @@ input[type="time"].co-input::-webkit-calendar-picker-indicator {
  #coord-app-root .co-table td[data-label="Client"]>div{text-align:left;font-size:17px;color:#0f172a}
  #coord-app-root .co-table td[data-label="Client"]>a{font-size:15px!important}
 }
+
+/* --- 1.2.0 : scans PDF des pièces --- */
+#coord-app-root .co-scan-progress{margin-top:8px;padding:10px 14px;border-radius:12px;background:#f5f3ff;color:#4c1d95;font-size:13px}
+#coord-app-root .co-scans{margin-top:12px;padding:12px;border:1px dashed #cbd5e1;border-radius:12px;background:#fbfdff}
+#coord-app-root .co-piece-scan-hint .co-scans{border-color:#0f766e;border-style:solid;box-shadow:0 0 0 3px rgba(15,118,110,.15)}
+#coord-app-root .co-scans-head{font-weight:650;font-size:13px;color:#334155;margin-bottom:8px}
+#coord-app-root .co-scan-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-top:1px solid #edf2f7}
+#coord-app-root .co-scan-meta{font-size:13px;line-height:1.35;min-width:0}
+#coord-app-root .co-scan-meta small{color:#64748b}
+#coord-app-root .co-scan-links{display:flex;flex-wrap:wrap;gap:6px}
+#coord-app-root .co-scan-links .co-btn{min-height:40px;display:inline-flex;align-items:center;text-decoration:none}
+#coord-app-root .co-scan-empty{font-size:13px;color:#64748b;margin-bottom:8px}
+#coord-app-root .co-scan-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+#coord-app-root .co-scan-actions .co-btn{min-height:46px;display:inline-flex;align-items:center;justify-content:center}
+#coord-app-root .co-file-btn{position:relative;overflow:hidden;cursor:pointer}
+#coord-app-root .co-file-btn.is-disabled{opacity:.5;pointer-events:none}
+/* Champ fichier invisible mais actif : le libellé reste la zone tactile (iOS/Android). */
+#coord-app-root .co-file-input{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0 0 0 0)}
+#coord-app-root .co-file-btn:focus-within{outline:3px solid rgba(15,118,110,.45);outline-offset:2px}
+#coord-app-root .co-scan-session{margin-top:8px}
+#coord-app-root .co-scan-thumbs{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px}
+#coord-app-root .co-scan-thumbs figure{position:relative;margin:0;flex:none;width:84px;text-align:center;font-size:11px;color:#475569}
+#coord-app-root .co-scan-thumbs img{width:84px;height:112px;object-fit:cover;border-radius:8px;border:1px solid #cbd5e1;background:#fff}
+#coord-app-root .btn-scan-page-del{position:absolute;top:2px;right:2px;width:32px;height:32px;border-radius:50%;border:none;background:rgba(15,23,42,.75);color:#fff;font-size:18px;line-height:1;cursor:pointer}
+#coord-app-root .co-scan-busy{align-self:center;font-size:13px;color:#0f766e;padding:0 8px}
+#coord-app-root .co-scan-option{display:flex;align-items:center;gap:8px;font-size:13px;margin-top:8px}
+#coord-app-root .co-scan-option input{width:20px;height:20px;accent-color:#0f766e}
+#coord-app-root .co-scan-limit{font-size:12px;color:#64748b;align-self:center}
+@media(max-width:768px){
+ #coord-app-root .co-scan-actions .co-btn{flex:1 1 140px}
+ #coord-app-root .co-scan-links{width:100%}
+ #coord-app-root .co-scan-links .co-btn{flex:1 1 auto;justify-content:center}
+}
+
+/* --- 1.3.0 : parcours guidé RDV → scan → validation --- */
+#coord-app-root .co-modal-body > .co-feedback{position:sticky;top:0;z-index:3;margin:0 0 10px;box-shadow:0 4px 12px rgba(15,23,42,.12)}
+#coord-app-root .co-step-banner{display:flex;flex-direction:column;gap:6px;padding:12px 14px;margin-bottom:10px;border-radius:12px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;font-size:14px}
+#coord-app-root .co-step-banner span{font-size:13px;color:#334155}
+#coord-app-root .co-step-banner.is-blocked{background:#fffbeb;border-color:#fcd34d;color:#78350f}
+#coord-app-root .co-step-banner .co-btn{align-self:flex-start;min-height:46px;margin-top:4px}
+#coord-app-root .co-piece-checks label.is-waiting{border-style:dashed;color:#64748b}
+#coord-app-root .co-piece-card.is-validated .co-piece-heading strong::after{content:" ✅"}
+#coord-app-root .co-piece-card.is-scanned:not(.is-validated) .co-piece-heading strong::after{content:" 📎"}
+@media(max-width:768px){
+ #coord-app-root .co-step-banner .co-btn{align-self:stretch}
+}
+
+/* --- 1.4.0 : scanner en direct (détection automatique de la feuille) --- */
+html.co-docscan-open, html.co-docscan-open body { overflow: hidden !important; }
+#coord-app-root .co-scan-actions { position: relative; }
+.co-docscan { position: fixed; inset: 0; z-index: 100000; display: flex; flex-direction: column; background: #000; color: #fff; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; touch-action: none; }
+.co-docscan-top, .co-docscan-bottom { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: rgba(0,0,0,.85); }
+.co-docscan-top { padding-top: max(10px, env(safe-area-inset-top)); }
+.co-docscan-bottom { justify-content: space-between; padding-bottom: max(14px, env(safe-area-inset-bottom)); }
+.co-docscan-title { flex: 1; min-width: 0; font-weight: 650; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.co-docscan-count { font-weight: 400; color: #cbd5e1; }
+.co-docscan-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.co-docscan-video, .co-docscan-overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+.co-docscan-video { object-fit: contain; background: #000; }
+.co-docscan-hint { position: absolute; left: 12px; right: 12px; bottom: 12px; padding: 10px 12px; border-radius: 12px; background: rgba(15,23,42,.78); font-size: 15px; text-align: center; }
+.co-docscan-flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
+.co-docscan-flash.is-on { animation: co-docscan-flash .35s ease-out; }
+@keyframes co-docscan-flash { from { opacity: .85; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .co-docscan-flash.is-on { animation: none; } }
+.co-docscan button { font: inherit; cursor: pointer; }
+.co-docscan-chip, .co-docscan-done, .co-docscan-close, .co-docscan-fallback { min-height: 46px; padding: 0 14px; border-radius: 23px; border: 1px solid rgba(255,255,255,.35); background: rgba(255,255,255,.12); color: #fff; font-size: 14px; }
+.co-docscan-close { min-width: 46px; padding: 0; font-size: 20px; }
+.co-docscan-done { background: #16a34a; border-color: #16a34a; font-weight: 650; }
+.co-docscan-shutter { width: 74px; height: 74px; flex: none; border-radius: 50%; border: 5px solid #fff; background: rgba(255,255,255,.25); box-shadow: 0 0 0 3px rgba(0,0,0,.5); }
+.co-docscan-shutter:active { background: #fff; }
+.co-docscan-shutter:disabled { opacity: .4; }
+.co-docscan button:focus-visible { outline: 3px solid #facc15; outline-offset: 2px; }
+.co-docscan-error { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; text-align: center; background: #0f172a; font-size: 15px; }
+.co-docscan-error[hidden] { display: none; }
+.co-docscan-fallback { background: #0f766e; border-color: #0f766e; font-weight: 650; }
+.co-docscan-engine { display: block; font-size: 12px; font-weight: 400; color: #94a3b8; }
+
+/* --- 1.6.0 : mode guidé (scan → valider → suivant) --- */
+.co-docscan [hidden] { display: none !important; }
+.co-docscan-panel { position: absolute; left: 0; right: 0; bottom: 0; max-height: 100%; overflow-y: auto; background: #fff; color: #0f172a; border-radius: 18px 18px 0 0; padding: 16px 16px max(16px, env(safe-area-inset-bottom)); box-shadow: 0 -8px 24px rgba(0,0,0,.35); }
+.co-guided-head { font-size: 17px; margin-bottom: 4px; }
+.co-guided-head span { color: #64748b; font-size: 14px; }
+.co-guided-ar { font-size: 15px; color: #334155; margin-bottom: 8px; }
+.co-guided-thumbs { display: flex; gap: 10px; overflow-x: auto; padding: 6px 0 10px; }
+.co-guided-thumbs figure { position: relative; margin: 0; flex: none; text-align: center; font-size: 12px; color: #475569; }
+.co-guided-thumbs img { display: block; height: 30vh; max-height: 260px; max-width: 70vw; object-fit: contain; border: 1px solid #cbd5e1; border-radius: 10px; background: #f8fafc; }
+.co-guided-del { position: absolute; top: 4px; right: 4px; width: 36px; height: 36px; border-radius: 50%; border: none; background: rgba(15,23,42,.75); color: #fff; font-size: 20px; }
+.co-guided-msg { min-height: 1.2em; margin: 4px 0 8px; font-size: 14px; color: #0f766e; }
+.co-guided-msg.is-error { color: #b91c1c; }
+.co-guided-actions { display: flex; flex-direction: column; gap: 8px; }
+.co-guided-actions button { min-height: 50px; border-radius: 12px; border: 1px solid #cbd5e1; background: #f1f5f9; color: #0f172a; font-size: 16px; }
+.co-guided-actions .co-guided-primary { background: #16a34a; border-color: #16a34a; color: #fff; font-weight: 700; font-size: 17px; min-height: 56px; }
+.co-guided-actions .co-guided-link { background: transparent; border: none; color: #64748b; text-decoration: underline; min-height: 44px; }
+.co-guided-actions button:disabled { opacity: .5; }
+.co-guided-missing { margin: 6px 0 12px 20px; }
+#coord-app-root .co-step-banner .btn-guided-scan { min-height: 50px; font-size: 16px; }
+
+/* --- Application Android : Coordination seule, sans la barre Nextcloud --- */
+html.co-android { --header-height: 0px !important; }
+html.co-android #header, html.co-android header#header, html.co-android .header-start, html.co-android #skip-actions { display: none !important; }
+html.co-android #content, html.co-android #content-vue, html.co-android .content { margin-top: 0 !important; padding-top: 0 !important; top: 0 !important; }
+html.co-android #coord-app-root .co-logout { text-decoration: none; display: inline-flex; align-items: center; min-height: 44px; }

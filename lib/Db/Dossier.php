@@ -21,6 +21,11 @@ class Dossier extends Entity implements \JsonSerializable {
     protected $createdBy = null;
     protected $createdAt = 0;
     protected $updatedAt = 0;
+    protected $revision = 0;
+
+    public function __construct() {
+        $this->addType('revision', 'integer');
+    }
 
     public function jsonSerialize(): array {
         $customDecoded = [];
@@ -49,6 +54,7 @@ class Dossier extends Entity implements \JsonSerializable {
             'created_by' => (string)$this->createdBy,
             'created_at' => (int)$this->createdAt,
             'updated_at' => (int)$this->updatedAt,
+            'revision' => (int)$this->revision,
         ];
     }
 }

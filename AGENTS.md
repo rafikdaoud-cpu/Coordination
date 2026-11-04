@@ -21,6 +21,12 @@ Application Nextcloud autonome, identifiant `coordination`, namespace
 - Priorité smartphone : tester 360 et 390 pixels, appels `tel:`, zones tactiles,
   onglets accessibles, défilement du corps des fiches et boutons bas visibles.
 - En cas d'échec réseau, ne pas afficher un succès ni vider le formulaire.
+- Toute écriture d'un dossier passe par `DossierLock::claim` dans sa transaction
+  (statut attendu, révision si fournie) ; ne pas réintroduire d'écriture non verrouillée.
+- Scans : jamais servis sans `Workflow::canViewScans` ; les commerciaux n'y ont pas
+  accès ; ne pas exposer `file_name` ni le chemin AppData ; vérifier l'en-tête PDF.
+- Erreurs : `ApiResponses::failure` ; seuls les messages de `PublicException` sont
+  montrés, le reste est journalisé.
 
 ## Vérification
 

@@ -22,6 +22,12 @@ return [
         ['name' => 'dossier_api#updateChecklist', 'url' => '/api/dossiers/{id}/checklist', 'verb' => 'POST'],
         ['name' => 'dossier_api#changeStatus', 'url' => '/api/dossiers/{id}/status', 'verb' => 'POST'],
 
+        // API Scans PDF des pièces
+        ['name' => 'scan_api#upload', 'url' => '/api/dossiers/{id}/checklist/{itemId}/scans', 'verb' => 'POST'],
+        ['name' => 'scan_api#file', 'url' => '/api/dossiers/{id}/scans/{scanId}/file', 'verb' => 'GET'],
+        ['name' => 'scan_api#destroy', 'url' => '/api/dossiers/{id}/scans/{scanId}', 'verb' => 'DELETE'],
+        ['name' => 'scan_api#destroyPost', 'url' => '/api/dossiers/{id}/scans/{scanId}/delete', 'verb' => 'POST'],
+
         // API Import XLSX
         ['name' => 'import_api#uploadXlsx', 'url' => '/api/import/xlsx', 'verb' => 'POST'],
 
