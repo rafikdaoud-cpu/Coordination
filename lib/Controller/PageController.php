@@ -18,6 +18,7 @@ class PageController extends Controller {
      */
     public function index(): TemplateResponse {
         Util::addScript('coordination', 'communes');
+        Util::addScript('coordination', 'scanpdf');
         Util::addScript('coordination', 'app');
         Util::addStyle('coordination', 'app');
 

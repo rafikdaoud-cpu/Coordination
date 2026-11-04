@@ -32,4 +32,6 @@ class Access {
     }
     public function canView(): bool { return in_array(true,$this->roles(),true); }
     public function canManage(): bool { return $this->roles()['rcoord']; }
+    /** occ config:app:set coordination scan_required --value=1 : scan PDF exigé pour chaque pièce obligatoire avant la collecte. */
+    public function scanRequired(): bool { return in_array($this->config->getAppValue('coordination','scan_required','0'),['1','true','yes'],true); }
 }

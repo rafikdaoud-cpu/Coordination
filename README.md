@@ -1,4 +1,4 @@
-# Coordination — Nextcloud — 1.1.0
+# Coordination — Nextcloud — 1.2.0
 
 Gestion des dossiers clients de CSM Taksit : attribution aux coordinateurs,
 appel et rendez-vous, collecte physique des pièces, puis contrôle Back-Office.
@@ -19,6 +19,31 @@ Cette version prépare un usage fréquent sur smartphone.
 Une connexion est nécessaire. Cette version n'enregistre pas les formulaires
 hors ligne et ne les restaure pas après fermeture du navigateur.
 
+## Scan des pièces en PDF
+
+Quand le coordinateur confirme la réception d'une pièce, il la scanne depuis la
+fiche, onglet **Pièces** :
+
+1. Cocher « Vérifié par le coordinateur » : l'application propose le scan.
+2. **📷 Scanner** ouvre l'appareil photo arrière. Une photo = une page ;
+   **➕ Page suivante** pour un recto-verso (10 pages maximum). Le « mode document »
+   (noir et blanc contrasté) améliore la lisibilité du texte.
+3. **✅ Envoyer le PDF** : les photos sont réduites et assemblées en PDF A4 sur le
+   téléphone, puis envoyées (environ 250 à 500 Ko par page).
+4. **🖼️ Galerie ou PDF** accepte aussi des photos existantes ou un PDF déjà produit
+   par une application de scan.
+
+Le Back-Office, le responsable et le coordinateur affecté voient les scans sous
+chaque pièce : **👁️ Voir** (nouvel onglet) et **⬇️ Télécharger**. Les commerciaux et
+les autres coordinateurs n'y ont pas accès. Le coordinateur peut supprimer ses scans
+jusqu'à la transmission au BO ; ensuite seul le responsable le peut. Limites : PDF
+réel uniquement (contrôlé sur le serveur), 20 Mo par scan, 10 scans par pièce.
+
+Les fichiers sont stockés dans les données privées de l'application Nextcloud
+(pas dans « Fichiers »). Le scan est facultatif par défaut ; l'administrateur peut
+l'exiger pour chaque pièce obligatoire avant la collecte (`scan_required`, voir le
+guide de déploiement).
+
 ## Rôles et droits
 
 | Rôle | Groupe par défaut | Accès |
@@ -27,7 +52,7 @@ hors ligne et ne les restaure pas après fermeture du navigateur.
 | Responsable | `csm_rcoordinateur` | Création, import, attribution, suivi, contrôle, suppression |
 | Coordinateur | `csm_coordinateur` | Ses dossiers attribués, pièces, rendez-vous et collecte |
 | Back-Office | `csm_backoffice` | Lecture des dossiers et contrôle des dossiers collectés |
-| Commercial | `callcrm_commercial`, `easycrm_commercial`, `csm_commercial` | Lecture des dossiers, sans écriture |
+| Commercial | `callcrm_commercial`, `easycrm_commercial`, `csm_commercial` | Lecture des dossiers, sans écriture ni accès aux scans |
 
 La lecture par les commerciaux conserve le comportement de l'application reçue.
 Les groupes sont comparés exactement. Les anciens rapprochements par mots comme
@@ -48,6 +73,12 @@ et remplace les groupes par défaut pour ce rôle. Voir le guide de déploiement
    ou rejette avec un motif.
 5. Un dossier rejeté peut être corrigé puis présenté à nouveau. Les anciennes cases
    de conformité Back-Office sont alors remises à zéro.
+
+Une fois le dossier collecté, son attribution est figée : l'attribution groupée
+(sélection ou wilaya) ignore les dossiers collectés ou validés et indique leur nombre.
+Retirer le coordinateur d'un dossier en cours le remet au statut « Nouveau ».
+Si deux personnes modifient le même dossier en même temps, la seconde écriture est
+refusée (« modifié entre-temps ») au lieu d'écraser la première.
 
 Ces règles sont contrôlées sur le serveur. La suppression définitive est réservée
 au responsable et à l'administrateur.
@@ -96,8 +127,9 @@ PHP_BIN=/chemin/vers/php bash tests/run.sh
 ```
 
 Les tests PHP nécessitent aussi PDO SQLite. Ils couvrent les autorisations et
-transitions, l'import de fichiers XLSX générés et l'annulation transactionnelle
-d'une création incomplète. Les tests navigateur nécessitent Python, Playwright
+transitions, la concurrence, l'import de fichiers XLSX générés, l'annulation
+transactionnelle d'une création incomplète, et les scans (dépôt, droits, contrôle PDF,
+stockage, suppression). `tests/pdf.js` vérifie le PDF assemblé côté téléphone. Les tests navigateur nécessitent Python, Playwright
 et Chromium :
 
 ```bash
@@ -105,7 +137,8 @@ CHROMIUM_BIN=/chemin/vers/chromium python3 tests/browser-smoke.py /tmp/coord-pre
 ```
 
 Neuf parcours vérifient les rôles coordinateur, BO et responsable à 360, 390 et
-1 280 pixels, avec une API de démonstration. Ils ne valident pas l'installation sur
+1 280 pixels, avec une API de démonstration, dont la prise de deux photos, l'envoi
+d'un vrai PDF et la consultation BO. Ils ne valident pas l'installation sur
 un serveur Nextcloud réel.
 
 Détails techniques et limites : [docs/REPRISE_IA.md](docs/REPRISE_IA.md).

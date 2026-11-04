@@ -8,6 +8,9 @@ while IFS= read -r -d '' file; do
 done < <(find lib appinfo templates tests -type f -name '*.php' -print0)
 node --check js/app.js
 node --check js/communes.js
+node --check js/scanpdf.js
 "$php_bin" tests/import.php
 "$php_bin" tests/create.php
-echo 'Syntaxe PHP/JavaScript et 49 contrôles automatisés réussis.'
+"$php_bin" tests/scan.php
+node tests/pdf.js
+echo 'Syntaxe PHP/JavaScript et 99 contrôles automatisés réussis.'

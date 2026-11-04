@@ -49,7 +49,8 @@ class DossierMapper extends QBMapper {
         }
 
         if (!empty($search)) {
-            $term = '%' . $search . '%';
+            // % et _ saisis sont cherchés littéralement, pas comme jokers SQL.
+            $term = '%' . $this->db->escapeLikeParameter(mb_substr(trim($search), 0, 100)) . '%';
             $qb->andWhere(
                 $qb->expr()->orX(
                     $qb->expr()->like('case_number', $qb->createNamedParameter($term)),

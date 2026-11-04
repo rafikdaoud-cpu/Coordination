@@ -6,9 +6,12 @@
 (function () {
     'use strict';
 
-    const APP_VERSION = '1.1.0';
+    const APP_VERSION = '1.2.0';
     let initialized = false, dossierRequest = 0;
     let mutationBusy = false;
+    let lastModalKey = '';
+    /** Scan en cours : { itemId, pages:[{jpeg,width,height,preview}], busy } — pages déjà réduites en JPEG. */
+    let scanSession = null;
 
     const state = {
         dossiers: [],
@@ -40,6 +43,9 @@
         dirty: false,
         modal: null, // 'detail', 'new', 'import', 'settings'
         activeModalTab: 'info', // 'info', 'checklist', 'appointment', 'history'
+        scanRequired: false,
+        scanMaxBytes: 20 * 1024 * 1024,
+        scanDocMode: false,
     };
 
     const statusMap = {
@@ -51,14 +57,14 @@
         'rejected': { label: 'Rejeté / Incomplet', class: 'co-badge-rejected' },
     };
 
-    async function apiRequest(endpoint, method = 'GET', body = null, isFormData = false) {
+    async function apiRequest(endpoint, method = 'GET', body = null, isFormData = false, timeoutMs = 0) {
         const url = OC.generateUrl(`apps/coordination/${endpoint}`);
         const headers = {
             'requesttoken': OC.requestToken || ''
         };
 
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), isFormData ? 60000 : 20000);
+        const timeout = setTimeout(() => controller.abort(), timeoutMs || (isFormData ? 60000 : 20000));
         const options = { method, headers, signal:controller.signal };
 
         if (body) {
@@ -103,6 +109,8 @@
             state.documentTemplates = res.document_templates || [];
             state.customFields = res.custom_fields || [];
             state.banks = res.banks || [];
+            state.scanRequired = !!res.scan_required;
+            if (res.scan_max_bytes) state.scanMaxBytes = Number(res.scan_max_bytes);
             if (res.current_user) {
                 state.currentUser = res.current_user;
             }
@@ -268,6 +276,10 @@
         const search = document.activeElement;
         const editingSearch = search?.id === 'search-input' ? {value:search.value,start:search.selectionStart,end:search.selectionEnd} : null;
 
+        const modalKey = state.modal ? state.modal + ':' + state.activeModalTab + ':' + (state.currentDossier?.dossier?.id || '') : '';
+        const previousBody = root.querySelector('.co-modal-body');
+        const keepScroll = previousBody && modalKey === lastModalKey ? previousBody.scrollTop : null;
+
         const isRcoord = state.currentUser.is_rcoordinateur;
         const isReadonly = state.currentUser.is_readonly;
         root.classList.toggle('co-own-dossiers',state.currentUser.is_coordinateur && !isRcoord && !state.currentUser.is_backoffice);
@@ -346,6 +358,9 @@
         `;
 
         bindEvents();
+        lastModalKey = modalKey;
+        const body = root.querySelector('.co-modal-body');
+        if (body && keepScroll !== null) body.scrollTop = keepScroll;
         const activeFilter = root.querySelector('.co-tabs .co-tab.active');
         if (activeFilter) {
             const tabs = activeFilter.parentElement;
@@ -420,7 +435,7 @@
                 <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
                     <select class="co-input" id="batch-coord-select" style="width:auto; min-width:260px;">
                         <option value="">-- Choisir un coordinateur --</option>
-                        ${state.coordinators.map(u => `<option value="${escapeHtml(u.uid)}">${u.display_name} (${u.uid})</option>`).join('')}
+                        ${state.coordinators.map(u => `<option value="${escapeHtml(u.uid)}">${escapeHtml(u.display_name)} (${escapeHtml(u.uid)})</option>`).join('')}
                     </select>
 
                     <button class="co-btn co-btn-primary co-btn-sm" id="btn-batch-assign">Attribuer au coordinateur</button>
@@ -550,18 +565,67 @@
         const coordStage = ['assigned','appointment_set','rejected'].includes(d.status);
         const canCoord = canCoordinate(d) && coordStage;
         const canBO = (state.currentUser.is_backoffice || state.currentUser.is_rcoordinateur) && d.status === 'collected';
+        const showScans = !!state.currentDossier.can_view_scans;
         const mandatory = checklist.filter(x => x.is_mandatory);
         const field = canBO ? 'backoffice_checked' : 'coordinator_checked';
         const done = mandatory.filter(x => x[field]).length;
+        const scanned = mandatory.filter(x => x.scan_count > 0).length;
         return `<div class="co-mobile-checklist"><div class="co-checklist-progress" role="status">${done} / ${mandatory.length} pièces obligatoires vérifiées</div>
-          ${checklist.map(item => `<section class="co-piece-card">
+          ${showScans ? `<div class="co-scan-progress">📎 ${scanned} / ${mandatory.length} pièces obligatoires scannées${state.scanRequired ? ' · <strong>scan obligatoire avant transmission</strong>' : ''}</div>` : ''}
+          ${checklist.map(item => `<section class="co-piece-card" id="piece-${Number(item.id)}">
             <div class="co-piece-heading"><strong>${escapeHtml(item.document_label_fr)}</strong><span class="co-piece-required">${item.is_mandatory ? 'Obligatoire' : 'Facultatif'}</span></div>
             <div class="co-arabic" lang="ar" dir="rtl">${escapeHtml(item.document_label_ar)}</div>
             <div class="co-piece-checks">
              <label><input type="checkbox" class="chk-item" data-id="${Number(item.id)}" data-role="coordinator" ${item.coordinator_checked ? 'checked' : ''} ${canCoord ? '' : 'disabled'}><span>Vérifié par le coordinateur</span></label>
              <label><input type="checkbox" class="chk-item" data-id="${Number(item.id)}" data-role="backoffice" ${item.backoffice_checked ? 'checked' : ''} ${canBO ? '' : 'disabled'}><span>Conforme · Back-Office</span></label>
-            </div></section>`).join('')}
+            </div>
+            ${showScans ? renderPieceScans(d, item, canCoord) : ''}</section>`).join('')}
             ${checklist.length ? '' : '<p class="co-empty">Checklist indisponible : contactez le responsable avant de transmettre le dossier.</p>'}</div>`;
+    }
+
+    function scanUrl(d, scan, download) {
+        return OC.generateUrl(`apps/coordination/api/dossiers/${Number(d.id)}/scans/${Number(scan.id)}/file`) + (download ? '?download=1' : '');
+    }
+
+    function formatSize(bytes) {
+        return bytes >= 1048576 ? (bytes / 1048576).toFixed(1).replace('.', ',') + ' Mo' : Math.max(1, Math.round(bytes / 1024)) + ' Ko';
+    }
+
+    /** Scans d'une pièce : liste consultable/téléchargeable et, pour le coordinateur, prise de vue. */
+    function renderPieceScans(d, item, canScan) {
+        const scans = item.scans || [];
+        const itemId = Number(item.id);
+        const isRcoord = state.currentUser.is_rcoordinateur;
+        const session = scanSession && scanSession.itemId === itemId ? scanSession : null;
+        const rows = scans.map((sc, i) => {
+            const canDelete = isRcoord || (canScan && sc.uploaded_by === state.currentUser.uid);
+            return `<div class="co-scan-row">
+                <div class="co-scan-meta"><strong>📄 Scan ${i + 1}</strong> · ${sc.pages ? sc.pages + ' page(s) · ' : ''}${formatSize(sc.size)}<br><small>${formatDate(sc.uploaded_at)} · ${escapeHtml(userLabel(sc.uploaded_by))}</small></div>
+                <div class="co-scan-links">
+                    <a class="co-btn co-btn-secondary co-btn-sm" href="${scanUrl(d, sc, false)}" target="_blank" rel="noopener">👁️ Voir</a>
+                    <a class="co-btn co-btn-secondary co-btn-sm" href="${scanUrl(d, sc, true)}" download>⬇️ Télécharger</a>
+                    ${canDelete ? `<button type="button" class="co-btn co-btn-danger co-btn-sm btn-scan-delete" data-scan="${Number(sc.id)}" aria-label="Supprimer le scan ${i + 1}">🗑️</button>` : ''}
+                </div></div>`;
+        }).join('');
+        const empty = !scans.length && !session ? `<div class="co-scan-empty">${canScan ? (item.coordinator_checked ? '⚠️ Pièce vérifiée mais pas encore scannée.' : 'Aucun scan pour le moment.') : 'Aucun scan transmis.'}</div>` : '';
+        let actions = '';
+        if (canScan && session) {
+            actions = `<div class="co-scan-session" aria-label="Scan en cours">
+                <div class="co-scan-thumbs">${session.pages.map((p, i) => `<figure><img src="${p.preview}" alt="Page ${i + 1}"><figcaption>Page ${i + 1}</figcaption><button type="button" class="btn-scan-page-del" data-index="${i}" aria-label="Retirer la page ${i + 1}">×</button></figure>`).join('')}
+                    ${session.busy ? '<div class="co-scan-busy" role="status">⏳ Traitement…</div>' : ''}</div>
+                <label class="co-scan-option"><input type="checkbox" class="scan-doc-mode" ${state.scanDocMode ? 'checked' : ''}> Mode document (noir et blanc contrasté) pour les pages suivantes</label>
+                <div class="co-scan-actions">
+                    ${session.pages.length < 10 ? `<label class="co-btn co-btn-secondary co-file-btn">➕ Page suivante<input type="file" accept="image/*" capture="environment" class="co-file-input scan-photo-input" data-item="${itemId}"></label>` : '<span class="co-scan-limit">10 pages maximum</span>'}
+                    <button type="button" class="co-btn co-btn-success btn-scan-send" data-item="${itemId}" ${session.pages.length && !session.busy ? '' : 'disabled'}>✅ Envoyer le PDF (${session.pages.length} page${session.pages.length > 1 ? 's' : ''})</button>
+                    <button type="button" class="co-btn co-btn-secondary btn-scan-cancel">Annuler</button>
+                </div></div>`;
+        } else if (canScan) {
+            actions = `<div class="co-scan-actions">
+                <label class="co-btn co-btn-primary co-file-btn">📷 Scanner<input type="file" accept="image/*" capture="environment" class="co-file-input scan-photo-input" data-item="${itemId}"></label>
+                <label class="co-btn co-btn-secondary co-file-btn">🖼️ Galerie ou PDF<input type="file" accept="image/*,application/pdf,.pdf" multiple class="co-file-input scan-pick-input" data-item="${itemId}"></label>
+            </div>`;
+        }
+        return `<div class="co-scans"><div class="co-scans-head">📎 Scans PDF${scans.length ? ` (${scans.length})` : ''}</div>${rows}${empty}${actions}</div>`;
     }
 
     function renderAppointmentTab(d) {
@@ -719,8 +783,9 @@
         }
 
         if (state.activeModalTab === 'appointment' && (d.status === 'appointment_set' || d.status === 'assigned')) {
-            const hasDate = !!(d.appointment_date || '').trim() && !!(d.appointment_time || '').trim() && state.currentDossier.checklist.length > 0 && state.currentDossier.checklist.every(x => !x.is_mandatory || x.coordinator_checked);
-            return `<button class="co-btn co-btn-primary" id="btn-action-collected" data-id="${d.id}" ${hasDate ? '' : 'disabled'} title="Renseignez d'abord la date du rendez-vous">Suivant&nbsp;: dossier récupéré → envoyer au Back-Office</button>`;
+            const list = state.currentDossier.checklist;
+            const hasDate = !!(d.appointment_date || '').trim() && !!(d.appointment_time || '').trim() && list.length > 0 && list.every(x => !x.is_mandatory || (x.coordinator_checked && (!state.scanRequired || x.scan_count > 0)));
+            return `<button class="co-btn co-btn-primary" id="btn-action-collected" data-id="${d.id}" ${hasDate ? '' : 'disabled'} title="${state.scanRequired ? 'Rendez-vous, pièces vérifiées et scannées requis' : 'Renseignez d\'abord la date du rendez-vous'}">Suivant&nbsp;: dossier récupéré → envoyer au Back-Office</button>`;
         }
 
         return '';
@@ -1074,12 +1139,12 @@
 
                 const res = await apiRequest('api/dossiers/batch-assign', 'POST', payload);
                 if (res.success && res.updated_count > 0) {
-                    alert(`Attribution effectuée : ${res.updated_count} dossier(s) attribué(s).`);
+                    alert(`Attribution effectuée : ${res.updated_count} dossier(s) attribué(s).` + (res.skipped_count ? `\n${res.skipped_count} dossier(s) déjà transmis au Back-Office ou validés : attribution inchangée.` : ''));
                     state.selectedDossierIds.clear();
                     await loadDossiers();
                     render();
                 } else {
-                    alert('Attribution non effectuée : ' + (res.error || 'aucun dossier mis à jour'));
+                    alert('Attribution non effectuée : ' + (res.error || (res.skipped_count ? 'les dossiers visés sont déjà transmis au Back-Office ou validés.' : 'aucun dossier mis à jour')));
                     await loadDossiers();
                     render();
                 }
@@ -1196,7 +1261,9 @@
         }
 
         const closeModal = () => {
+            if (scanSession && scanSession.pages.length && !confirm('Abandonner le scan en cours (pages non envoyées) ?')) return;
             if (state.dirty && !confirm('Fermer sans enregistrer vos modifications ?')) return;
+            clearScanSession();
             state.dirty = false;
             state.modal = null;
             state.currentDossier = null;
@@ -1213,7 +1280,9 @@
 
         document.querySelectorAll('[data-modal-tab]').forEach(btn => {
             btn.addEventListener('click', (e) => {
+                if (scanSession && scanSession.pages.length && !confirm('Abandonner le scan en cours (pages non envoyées) ?')) return;
                 if (state.dirty && !confirm('Changer d’onglet sans enregistrer vos modifications ?')) return;
+                clearScanSession();
                 state.dirty = false;
                 state.activeModalTab = e.currentTarget.getAttribute('data-modal-tab');
                 render();
@@ -1331,9 +1400,16 @@
                 const done = mandatory.filter(x => x[field]).length;
                 const progress = document.querySelector('.co-checklist-progress'); if (progress) progress.textContent = `${done} / ${mandatory.length} pièces obligatoires vérifiées`;
                 const validate = document.getElementById('btn-action-validate-bo'); if (validate) validate.disabled = !state.currentDossier.checklist.length || done !== mandatory.length;
-                feedback('Pièce enregistrée.',false);
+                const needsScan = role === 'coordinator' && checked && state.currentDossier.can_view_scans && item && !item.scan_count;
+                feedback(needsScan ? 'Pièce enregistrée. Scannez-la maintenant avec « 📷 Scanner » sous cette pièce.' : 'Pièce enregistrée.',false);
+                if (needsScan) {
+                    const card = document.getElementById('piece-' + itemId);
+                    if (card) { card.classList.add('co-piece-scan-hint'); card.querySelector('.co-scans')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+                }
             });
         });
+
+        bindScanEvents();
 
         const saveAppBtn = document.getElementById('btn-save-appointment');
         if (saveAppBtn) {
@@ -1381,6 +1457,7 @@
                     commune: readCommune('edit-commune'),
                     bank: document.getElementById('edit-bank').value.trim(),
                     case_number: document.getElementById('edit-case-number').value.trim(),
+                    revision: state.currentDossier.dossier.revision,
                 };
 
                 const updated = await apiRequest(`api/dossiers/${dossierId}/update`, 'POST', data);
@@ -1455,6 +1532,116 @@
                 }
             });
         }
+    }
+
+    function clearScanSession() {
+        if (scanSession) scanSession.pages.forEach(p => URL.revokeObjectURL(p.preview));
+        scanSession = null;
+    }
+
+    function scanFileName(itemId) {
+        const d = state.currentDossier.dossier;
+        const item = (state.currentDossier.checklist || []).find(i => Number(i.id) === itemId);
+        return `${d.case_number || 'dossier-' + d.id}_${(item && item.document_code) || 'piece'}.pdf`.replace(/[^A-Za-z0-9._-]+/g, '_');
+    }
+
+    async function uploadScan(itemId, blob, name) {
+        if (blob.size > state.scanMaxBytes) { feedback(`Scan trop volumineux (${formatSize(blob.size)}). Maximum : ${formatSize(state.scanMaxBytes)}.`); return false; }
+        const dossierId = state.currentDossier.dossier.id;
+        const form = new FormData();
+        form.append('file', blob, name);
+        feedback('⏳ Envoi du scan en cours… gardez l’application ouverte.', false);
+        document.querySelectorAll('.btn-scan-send').forEach(b => { b.disabled = true; });
+        document.querySelectorAll('.co-scans .co-file-btn').forEach(b => b.classList.add('is-disabled'));
+        const res = await apiRequest(`api/dossiers/${dossierId}/checklist/${itemId}/scans`, 'POST', form, true, 180000);
+        if (!res.success) {
+            render();
+            feedback('Scan non enregistré : ' + (res.error || 'erreur inconnue') + (scanSession ? ' Les pages restent prêtes : réessayez.' : ''));
+            return false;
+        }
+        clearScanSession();
+        await openDossierDetail(dossierId);
+        feedback('✅ Scan PDF enregistré. Le Back-Office peut le consulter.', false);
+        return true;
+    }
+
+    async function addScanPhotos(itemId, files) {
+        if (!window.CoordinationScan) { feedback('Module de scan non chargé : rechargez la page.'); return; }
+        if (scanSession && scanSession.itemId !== itemId) {
+            if (scanSession.pages.length && !confirm('Un scan d’une autre pièce n’est pas envoyé. L’abandonner ?')) return;
+            clearScanSession();
+        }
+        if (!scanSession) scanSession = { itemId, pages: [], busy: false };
+        const session = scanSession;
+        session.busy = true; render();
+        let error = '';
+        try {
+            for (const file of files) {
+                if (session.pages.length >= 10) { error = '10 pages maximum par scan : envoyez ce PDF puis faites un second scan.'; break; }
+                session.pages.push(await window.CoordinationScan.photoToPage(file, state.scanDocMode));
+            }
+        } catch (err) {
+            console.error('Scan error:', err);
+            error = 'Photo illisible ou mémoire insuffisante : reprenez la photo.';
+        } finally {
+            session.busy = false;
+            if (scanSession === session && !session.pages.length) clearScanSession();
+            render();
+            if (error) feedback(error);
+        }
+    }
+
+    function bindScanEvents() {
+        document.querySelectorAll('.scan-photo-input').forEach(input => input.addEventListener('change', async (e) => {
+            const files = Array.from(e.target.files || []);
+            const itemId = Number(e.target.getAttribute('data-item'));
+            e.target.value = '';
+            if (files.length) await addScanPhotos(itemId, files);
+        }));
+        document.querySelectorAll('.scan-pick-input').forEach(input => input.addEventListener('change', async (e) => {
+            const files = Array.from(e.target.files || []);
+            const itemId = Number(e.target.getAttribute('data-item'));
+            e.target.value = '';
+            const pdfs = files.filter(f => f.type === 'application/pdf' || /\.pdf$/i.test(f.name));
+            const images = files.filter(f => !pdfs.includes(f) && /^image\//.test(f.type));
+            if (pdfs.length > 1 || (pdfs.length && images.length)) { feedback('Choisissez un seul PDF, ou des photos (une par page).'); return; }
+            if (pdfs.length) { await uploadScan(itemId, pdfs[0], pdfs[0].name); return; }
+            if (images.length) await addScanPhotos(itemId, images);
+            else if (files.length) feedback('Format non pris en charge : choisissez une photo ou un PDF.');
+        }));
+        document.querySelectorAll('.scan-doc-mode').forEach(chk => chk.addEventListener('change', (e) => { state.scanDocMode = e.target.checked; }));
+        document.querySelectorAll('.btn-scan-page-del').forEach(btn => btn.addEventListener('click', (e) => {
+            if (!scanSession) return;
+            const [page] = scanSession.pages.splice(Number(e.currentTarget.getAttribute('data-index')), 1);
+            if (page) URL.revokeObjectURL(page.preview);
+            if (!scanSession.pages.length) clearScanSession();
+            render();
+        }));
+        document.querySelector('.btn-scan-cancel')?.addEventListener('click', () => {
+            if (scanSession && scanSession.pages.length && !confirm('Abandonner les pages photographiées ?')) return;
+            clearScanSession(); render();
+        });
+        document.querySelector('.btn-scan-send')?.addEventListener('click', async (e) => {
+            if (!scanSession || !scanSession.pages.length || mutationBusy) return;
+            mutationBusy = true;
+            try {
+                const itemId = Number(e.currentTarget.getAttribute('data-item'));
+                const pdf = window.CoordinationScan.buildPdf(scanSession.pages);
+                await uploadScan(itemId, new Blob([pdf], { type: 'application/pdf' }), scanFileName(itemId));
+            } catch (err) {
+                console.error('PDF error:', err);
+                feedback('Création du PDF impossible : ' + (err.message || err));
+            } finally { mutationBusy = false; }
+        });
+        document.querySelectorAll('.btn-scan-delete').forEach(btn => btn.addEventListener('click', async (e) => {
+            const scanId = Number(e.currentTarget.getAttribute('data-scan'));
+            if (!confirm('Supprimer définitivement ce scan ?')) return;
+            const dossierId = state.currentDossier.dossier.id;
+            const res = await apiRequest(`api/dossiers/${dossierId}/scans/${scanId}/delete`, 'POST');
+            if (!res.success) { feedback('Suppression impossible : ' + (res.error || 'erreur inconnue')); return; }
+            await openDossierDetail(dossierId);
+            feedback('Scan supprimé.', false);
+        }));
     }
 
     function escapeHtml(str) {

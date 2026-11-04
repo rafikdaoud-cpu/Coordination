@@ -10,7 +10,9 @@ use OCP\IGroupManager;
 use OCP\IRequest;
 use OCP\IUserSession;
 use OCA\Coordination\Service\Access;
-use Exception;
+use OCA\Coordination\Service\PublicException;
+use Psr\Log\LoggerInterface;
+use Throwable;
 
 class ImportApiController extends Controller {
     public function __construct(
@@ -19,7 +21,8 @@ class ImportApiController extends Controller {
         private DossierService $dossierService,
         private IUserSession $userSession,
         private IGroupManager $groupManager,
-        private Access $access
+        private Access $access,
+        private LoggerInterface $logger
     ) {
         parent::__construct($appName, $request);
     }
@@ -133,8 +136,13 @@ class ImportApiController extends Controller {
                 ], $userId);
 
                 $importedCount++;
-            } catch (Exception $e) {
-                $errors[] = "Ligne " . ($i + 1) . ": " . $e->getMessage();
+            } catch (Throwable $e) {
+                if ($e instanceof PublicException) {
+                    $errors[] = "Ligne " . ($i + 1) . ": " . $e->getMessage();
+                } else {
+                    $this->logger->error('Coordination : échec d’import d’une ligne', ['app'=>'coordination','exception'=>$e,'line'=>$i + 1]);
+                    $errors[] = "Ligne " . ($i + 1) . ": erreur technique (journalisée), ligne non créée.";
+                }
             }
         }
 

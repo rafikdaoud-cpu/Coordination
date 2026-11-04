@@ -231,10 +231,9 @@ class DossierService {
             $dossier->setCustomData(json_encode($data['custom_data'], JSON_UNESCAPED_UNICODE));
         }
 
-        if ($dossier->getClientName() === '') throw new \InvalidArgumentException('Le nom du client est obligatoire.');
-        $q = $this->db->getQueryBuilder();
-        $q->select('id')->from('coord_dossiers')->where($q->expr()->eq('case_number',$q->createNamedParameter($dossier->getCaseNumber())))->setMaxResults(1);
-        if ($q->executeQuery()->fetch()) throw new \DomainException('Ce numéro de dossier existe déjà.');
+        if ($dossier->getClientName() === '') throw new ValidationException('Le nom du client est obligatoire.');
+        if (mb_strlen($dossier->getCaseNumber()) > 64) throw new ValidationException('Numéro de dossier trop long (64 caractères maximum).');
+        if ($this->caseNumberExists($dossier->getCaseNumber())) throw new DuplicateException('Ce numéro de dossier existe déjà.');
         $this->db->beginTransaction();
         try {
         $savedDossier = $this->dossierMapper->insert($dossier);
@@ -262,6 +261,15 @@ class DossierService {
         $this->db->commit();
         return $savedDossier;
         } catch (\Throwable $e) { $this->db->rollBack(); throw $e; }
+    }
+
+    /** Vérification applicative : l'index historique n'est pas unique (voir REPRISE_IA). */
+    public function caseNumberExists(string $caseNumber, ?int $exceptId = null): bool {
+        $q = $this->db->getQueryBuilder();
+        $q->select('id')->from('coord_dossiers')->where($q->expr()->eq('case_number',$q->createNamedParameter($caseNumber)))->setMaxResults(2);
+        $r = $q->executeQuery(); $rows = $r->fetchAll(); $r->closeCursor();
+        foreach ($rows as $row) if ($exceptId === null || (int)$row['id'] !== $exceptId) return true;
+        return false;
     }
 
     public function addHistory(int $dossierId, string $userId, string $action, string $details): void {
@@ -316,6 +324,7 @@ class DossierService {
             'created_by' => (string)($row['created_by'] ?? ''),
             'created_at' => (int)$row['created_at'],
             'updated_at' => (int)$row['updated_at'],
+            'revision' => (int)($row['revision'] ?? 0),
         ];
 
         // 2. Checklist

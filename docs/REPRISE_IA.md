@@ -1,4 +1,4 @@
-# Reprise technique — Coordination 1.1.0
+# Reprise technique — Coordination 1.2.0
 
 ## Demande et périmètre
 
@@ -34,8 +34,9 @@ Coordination n'a été identifié. Ne pas publier dans un dépôt CRM par suppos
 | `tests/` | Doubles Nextcloud, SQLite, XLSX générés et scénarios Chromium |
 
 Identifiant : `coordination`. Namespace : `OCA\Coordination`. Tables `coord_*` sous
-le préfixe Nextcloud. Aucun changement de schéma dans 1.1.0 ; la version ne doit
-pas être appliquée en modifiant manuellement `installed_version`.
+le préfixe Nextcloud. Aucun changement de schéma dans 1.1.0 ; 1.2.0 ajoute une
+migration additive (`revision`, `coord_scans`). Une version ne doit jamais être
+appliquée en modifiant manuellement `installed_version`.
 
 ## Corrections structurantes
 
@@ -113,21 +114,58 @@ Il n'y a pas eu d'essai intégré sur le Nextcloud du VPS, de test Safari/iOS, n
 charge multiutilisateur. La plage déclarée Nextcloud 25–36 provient de l'archive
 et n'est pas une certification de cette matrice.
 
+## Version 1.2.0 : scans PDF et corrections
+
+Dépôt de destination identifié : `rafikdaoud-cpu/Coordination` (GitHub).
+
+| Emplacement | Fonction |
+| --- | --- |
+| `js/scanpdf.js` | Réduction des photos (1 800 px, JPEG 0,72, orientation EXIF), mode document, assemblage PDF A4 (`window.CoordinationScan`) |
+| `lib/Service/ScanService.php` | Contrôle PDF, stockage AppData `scans-d<ID>/`, table `coord_scans` |
+| `lib/Controller/ScanApiController.php` | Dépôt, ouverture/téléchargement, suppression, avec droits et verrou |
+| `lib/Service/DossierLock.php` | `UPDATE … SET revision = revision + 1 WHERE id AND status IN … [AND revision]` dans la transaction |
+| `lib/Controller/ApiResponses.php` | Codes HTTP, messages publics (`PublicException`), journalisation des erreurs techniques |
+| `lib/Migration/Version1200Date20261104120000.php` | Colonne `revision`, table `coord_scans` (additive) |
+
+Droits des scans (`Workflow`) : consultation par admin, responsable, BO et
+coordinateur affecté ; dépôt par le coordinateur affecté ou le responsable aux
+étapes `assigned`, `appointment_set`, `rejected` ; suppression par l'auteur à ces
+étapes ou par le responsable à tout moment. Les commerciaux, qui lisent les fiches,
+ne voient pas les scans : `show()` n'ajoute `scans` qu'avec `can_view_scans`.
+
+Ordre d'écriture d'un scan : fichier écrit, puis transaction (verrou, plafond de
+10 scans par pièce, ligne, historique) ; si la transaction échoue, le fichier est
+effacé. Pour une suppression de scan ou de dossier, les lignes sont supprimées en
+transaction puis les fichiers après le commit (au pire un fichier orphelin journalisé).
+L'URL de fichier est un GET sans jeton CSRF (lien direct « Voir ») : l'accès reste
+soumis à la session et aux droits, et une 404 ne révèle pas l'existence du dossier.
+
+Concurrence : la fiche envoie `revision` lors d'une modification par le responsable.
+Les autres écritures (RDV, cases, statut, scans) vérifient sous verrou que le statut
+lu est encore celui de la base ; `changeStatus` revérifie pièces et scans après verrou.
+`assignOne` ne modifie que les statuts `Workflow::REASSIGNABLE`.
+
+Vérification 1.2.0 : 99 contrôles `tests/run.sh` (PHP 8.4, Node 22) et 9 parcours
+Chromium avec prise de deux photos simulées, envoi d'un vrai PDF (en-tête vérifié)
+et consultation BO. Le PDF généré est lu sans erreur par poppler (`pdfinfo`,
+`pdftoppm`). Non testé : caméra réelle Android/iOS, Safari, Nextcloud réel
+(AppData, en-têtes CSP sur l'ouverture inline d'un PDF), limites du proxy web.
+
 ## Limites et suites utiles
 
-- Pas de capture/photo de pièces, téléversement de justificatifs ni dossier Nextcloud
-  Files lié. La checklist concerne les pièces physiques ; ne pas annoncer de stockage
-  documentaire absent.
+- Les scans ne sont pas dans Nextcloud Files ni partageables ; pas d'OCR, de
+  détection automatique des bords ou de redressement de perspective : cadrer la
+  pièce à plat. Pas de « tout télécharger » (ZIP) par dossier pour le BO.
+- Les scans ne sont pas chiffrés par l'application : ils suivent le chiffrement
+  éventuel du stockage Nextcloud. Aucune purge automatique : définir une durée de
+  conservation des pièces d'identité avec le responsable.
 - Pas de mode hors ligne, synchronisation différée, notification push ou géolocalisation.
   Une interruption peut avoir lieu après l'écriture serveur et avant sa réponse :
-  vérifier l'état réel avant une nouvelle tentative.
-- Pas de verrou ou numéro de révision serveur contre des écritures simultanées.
-  Les transactions empêchent certaines écritures partielles, mais ne rendent pas
-  les décisions concurrentes exclusives. Priorité suivante si forte concurrence.
-- Le refus de doublon de référence est une vérification préalable à la création.
-  L'index d'origine n'est pas unique : deux créations simultanées peuvent passer.
-  La modification d'une référence ne contrôle pas encore son unicité. Une migration
-  future devra traiter les doublons existants avant d'ajouter une contrainte.
+  vérifier l'état réel avant une nouvelle tentative (vaut aussi pour l'envoi d'un scan).
+- Unicité du numéro de dossier : contrôlée à la création et à la modification, mais
+  l'index historique n'est pas unique ; deux créations simultanées du même numéro
+  restent possibles. Une migration future devra traiter les doublons existants
+  avant d'ajouter une contrainte unique.
 - L'import est transactionnel par dossier, pas pour l'ensemble du fichier. Il faut
   corriger uniquement les lignes en erreur. La lecture est volontairement limitée
   à 256 colonnes et 2 000 lignes de données, avec une ligne d'anticipation, et ne
@@ -137,18 +175,13 @@ et n'est pas une certification de cette matrice.
   après autorisation. Cette réparation de lecture comporte encore des captures
   d'exception héritées ; une étape de réparation explicite et transactionnelle serait
   préférable. Elle n'ajoute pas de nouveaux modèles aux checklists déjà remplies.
-- Le paramétrage banques/champs personnalisés conserve une validation limitée ;
-  poursuivre l'unification de la validation et des longueurs sur toutes les entrées.
-- Quelques erreurs métier utilisent encore HTTP 200 avec `success:false`, et des
-  erreurs SQL peuvent exposer leur message au rôle autorisé ; normaliser les codes
-  et journaliser côté serveur avec des messages publics maîtrisés.
 - L'accessibilité complète clavier/lecteur d'écran n'est pas auditée ; ajouter un
   piège à focus et la gestion du fond inerte des modales lors d'une prochaine passe.
 - Certains messages utilisent encore `alert/confirm/prompt` natifs. Préserver la
   prévention des pertes et les confirmations de suppression si on les remplace.
 - Pas de signature Nextcloud App Store. Distribuer et versionner cette app privée
-  dans un dépôt Coordination identifié, sans embarquer de secrets ou de données clients.
+  dans ce dépôt, sans embarquer de secrets ou de données clients.
 
-Priorités possibles après recette : contrôle de concurrence, photos de justificatifs
-liées aux fichiers Nextcloud avec droits explicites, puis tableau de bord des retards
-et intégration CRM avec identifiants stables. Ces évolutions ne sont pas incluses.
+Priorités possibles après recette : téléchargement groupé des scans pour le BO,
+recadrage automatique des documents, tableau de bord des retards et intégration CRM
+avec identifiants stables. Ces évolutions ne sont pas incluses.

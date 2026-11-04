@@ -10,6 +10,7 @@ namespace OCA\Coordination\Db {
  class DossierConfigMapper {public function getValue($key){return $key==='document_templates'?json_encode([['code'=>'cni','label_fr'=>'CNI','label_ar'=>'هوية','mandatory'=>true],['code'=>'res','label_fr'=>'Résidence','label_ar'=>'إقامة','mandatory'=>true]]):null;}}
 }
 namespace {
+ foreach(['PublicException','ValidationException','DuplicateException'] as $c) require_once __DIR__."/../lib/Service/$c.php";
  require __DIR__.'/../lib/Service/DossierService.php';
  class DB implements \OCP\IDBConnection {
   public $pdo;public int $queries=0;

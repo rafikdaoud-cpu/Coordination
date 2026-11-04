@@ -8,10 +8,11 @@
 - Attribution individuelle et par zone géographique (Wilayas d'Algérie)
 - Prise de rendez-vous client et récupération physique par le coordinateur
 - Checklist bilingue des pièces justificatives (Français / Arabe)
+- Scan des pièces en PDF depuis le smartphone, consultation et téléchargement par le Back-Office
 - Contrôle de conformité et validation finale par le Back-Office
 - Suppression réservée aux responsables et administrateurs
     ]]></description>
-    <version>1.1.0</version>
+    <version>1.2.0</version>
     <namespace>Coordination</namespace>
     <licence>agpl</licence>
     <author>CSM Taksit / Antigravity</author>

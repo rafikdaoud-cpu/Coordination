@@ -9,7 +9,7 @@ function workbook(array $rows): string {
  $xml.='</sheetData></worksheet>';$zip->addFromString('xl/worksheets/sheet1.xml',$xml);$zip->close();return $file;
 }
 $session->uid='manager';$request->p=[];
-$import=new \OCA\Coordination\Controller\ImportApiController('coordination',$request,$service,$session,$groups,$access);
+$import=new \OCA\Coordination\Controller\ImportApiController('coordination',$request,$service,$session,$groups,$access,$logger);
 $file=workbook([['Nom du client','Numéro de téléphone','N° dossier'],['Client Test','0555000000','DOS-EXEMPLE']]);
 try {
  $request->upload=['tmp_name'=>$file,'size'=>filesize($file),'error'=>0];

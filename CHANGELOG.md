@@ -1,5 +1,42 @@
 # Changements
 
+## 1.2.0 — 2026-11-04
+
+### Nouveau : scan des pièces en PDF
+
+- Bouton « 📷 Scanner » sous chaque pièce : photos à l'appareil arrière, plusieurs
+  pages, aperçu et retrait de page, mode document noir et blanc, assemblage PDF A4
+  sur le téléphone (`js/scanpdf.js`, sans bibliothèque externe).
+- « Galerie ou PDF » : photos existantes ou PDF d'une application de scan.
+- Invitation à scanner après avoir coché une pièce ; progression des pièces scannées.
+- Back-Office, responsable et coordinateur affecté : « Voir » et « Télécharger ».
+  Commerciaux et autres coordinateurs : aucun accès (404).
+- Serveur : contrôle du contenu PDF, 20 Mo et 10 scans par pièce, stockage dans
+  les données privées de l'app, historique d'ajout/suppression, suppression avec
+  le dossier. Option `scan_required` pour exiger un scan par pièce obligatoire.
+- Migration additive : table `coord_scans`.
+
+### Corrections
+
+- Sécurité : le nom affiché d'un coordinateur était inséré sans échappement dans la
+  liste d'attribution groupée (XSS). Corrigé et couvert par un test navigateur.
+- L'attribution groupée par wilaya ou par sélection ne modifie plus les dossiers
+  collectés ou validés ; le nombre de dossiers ignorés est affiché. Même règle pour
+  l'attribution individuelle (409).
+- Retirer le coordinateur remet le dossier au statut « Nouveau ».
+- Concurrence : colonne `revision` et verrou de ligne transactionnel. Modification
+  de fiche avec révision périmée, décision BO, case cochée ou RDV sur un dossier
+  changé entre-temps : refus 409 au lieu d'un écrasement silencieux. Les pièces
+  sont revérifiées sous verrou avant collecte/validation.
+- Numéro de dossier : unicité contrôlée aussi à la modification ; nom du client
+  non vidable ; longueurs bornées (notes, consignes, banques, champs personnalisés).
+- Recherche : `%` et `_` saisis sont cherchés littéralement.
+- Erreurs : codes HTTP significatifs (400/403/404/409/413/500) ; les messages
+  techniques (SQL) sont journalisés côté serveur et remplacés par un message neutre,
+  y compris dans le rapport d'import.
+- Conservation du défilement de la fiche lors des rafraîchissements d'affichage.
+
+
 ## 1.1.0 — 2026-11-02
 
 Version préparée à partir de l'archive fournie `coordination-1.0.15.zip`.

@@ -2,12 +2,13 @@
 namespace OCP {
  interface IUserSession {} interface IGroupManager {} interface IConfig {} interface IRequest {} interface IDBConnection {}
 }
-namespace OCP\DB\QueryBuilder { interface IQueryBuilder { const PARAM_INT=1, PARAM_INT_ARRAY=101; } }
+namespace OCP\DB\QueryBuilder { interface IQueryBuilder { const PARAM_INT=1, PARAM_INT_ARRAY=101, PARAM_STR_ARRAY=102; } }
+namespace Psr\Log { interface LoggerInterface {} }
 namespace OCP\AppFramework { class Controller { protected $request; public function __construct($name,$request) { $this->request=$request; } } }
 namespace OCP\AppFramework\Http { class JSONResponse { public function __construct(public $data,public $status=200) {} } }
 namespace OCA\Coordination\Db {
  class Dossier {
-  public array $v=['id'=>1,'status'=>'assigned','assignedCoordinator'=>'coord','appointmentDate'=>'2026-11-03','appointmentTime'=>'10:00'];
+  public array $v=['id'=>1,'status'=>'assigned','assignedCoordinator'=>'coord','appointmentDate'=>'2026-11-03','appointmentTime'=>'10:00','caseNumber'=>'DOS-1','revision'=>3];
   public function __call($method,$args) { $k=lcfirst(substr($method,3)); if(str_starts_with($method,'set')) $this->v[$k]=$args[0]; else return $this->v[$k]??null; }
  }
  class DossierMapper {
@@ -15,7 +16,8 @@ namespace OCA\Coordination\Db {
   public function __construct(public Dossier $d) {}
   public function findById($id) { return $id===1 ? $this->d : null; }
   public function update($d) { $this->updates++; }
-  public function findFiltered(...$f) { $this->filter=$f; return array_fill(0,35,$this->d); }
+  public ?\Throwable $fail=null;
+  public function findFiltered(...$f) { if($this->fail) throw $this->fail; $this->filter=$f; return array_fill(0,35,$this->d); }
  }
  class DossierChecklistMapper {}
 }
@@ -27,10 +29,19 @@ namespace OCA\Coordination\Service {
   public array $pieces=[['id'=>1,'is_mandatory'=>true,'coordinator_checked'=>false,'backoffice_checked'=>false]];
   public function getDossierDetails($id) { $this->reads++; return ['dossier'=>['assigned_coordinator'=>'coord'],'checklist'=>$this->pieces]; }
   public function addHistory(...$args) { $this->history[]=$args; }
+  public function caseNumberExists($n,$except=null) { return $n==='DUP'; }
+ }
+ /** Double : nombre de scans par pièce, configurable par test. */
+ class ScanService {
+  public array $counts=[]; public array $removed=[];
+  public function attach($id,$pieces) { foreach($pieces as &$p) $p['scan_count']=$this->counts[$p['id']]??0; return $pieces; }
+  public function deleteRowsForDossier($id) {} public function removeFolder($id) { $this->removed[]=$id; }
  }
 }
 namespace {
- require __DIR__.'/../lib/Service/Access.php'; require __DIR__.'/../lib/Service/Workflow.php'; require __DIR__.'/../lib/Controller/DossierApiController.php';
+ foreach(['PublicException','ConflictException','ValidationException','DuplicateException','Access','Workflow','DossierLock'] as $c) require_once __DIR__."/../lib/Service/$c.php";
+ require_once __DIR__.'/../lib/Controller/ApiResponses.php'; require __DIR__.'/../lib/Controller/DossierApiController.php';
+ class Logger implements \Psr\Log\LoggerInterface { public array $logs=[]; public function error($m,$c=[]) { $this->logs[]=[$m,$c]; } public function warning($m,$c=[]) { $this->logs[]=[$m,$c]; } }
  class User { public function __construct(public string $uid) {} public function getUID() { return $this->uid; } }
  class Session implements \OCP\IUserSession { public string $uid='coord'; public function getUser() { return new User($this->uid); } }
  class Config implements \OCP\IConfig { public array $v=[]; public function getAppValue($app,$key,$default) { return $this->v[$key]??$default; } }
@@ -40,23 +51,42 @@ namespace {
  }
  class Request implements \OCP\IRequest { public array $p=[]; public array $upload=[]; public function getUploadedFile($name) { return $this->upload; } public function getParam($k,$d=null) { return $this->p[$k]??$d; } public function getParams() { return $this->p; } }
  class Database implements \OCP\IDBConnection {
-  public int $writes=0; public array $operations=[]; public function beginTransaction() {} public function commit() {} public function rollBack() {} public function getQueryBuilder() { return new Query($this); }
+  public int $writes=0; public array $operations=[]; public ?int $affected=null; public $dossier=null;
+  public function beginTransaction() {} public function commit() {} public function rollBack() {} public function getQueryBuilder() { return new Query($this); }
+  public function escapeLikeParameter($v) { return addcslashes($v,'\\%_'); }
  }
+ class Result { public function __construct(private array $rows) {} public function fetchAll() { return $this->rows; } public function fetch() { return $this->rows[0]??false; } public function closeCursor() {} }
  class Query {
-  public string $table=''; public array $sets=[];
+  public string $table=''; public array $sets=[]; public array $conds=[];
   public function __construct(private Database $db) {}
   public function update($table) { $this->table=$table; return $this; }
   public function set($key,$value) { $this->sets[$key]=$value; return $this; }
   public function expr() { return $this; }
   public function eq($a,$b) { return [$a,$b]; }
+  public function in($a,$b) { return [$a,$b]; }
+  public function where($c) { $this->conds[]=$c; return $this; }
+  public function andWhere($c) { $this->conds[]=$c; return $this; }
   public function createNamedParameter($v,$type=null) { return $v; }
-  public function executeStatement() { $this->db->writes++; $this->db->operations[]=['table'=>$this->table,'sets'=>$this->sets]; return 1; }
+  public function createFunction($f) { return 'FN:'.$f; }
+  public function executeQuery() { return new Result([['id'=>1]]); }
+  /** Applique les conditions statut/révision du dossier simulé, comme le ferait la base. */
+  public function executeStatement() {
+   if ($this->db->affected!==null && $this->table==='coord_dossiers') { $this->db->operations[]=['table'=>$this->table,'sets'=>$this->sets,'refused'=>true]; return $this->db->affected; }
+   if ($this->table==='coord_dossiers' && $this->db->dossier) {
+    foreach($this->conds as [$col,$val]) {
+     if ($col==='status' && !in_array($this->db->dossier->getStatus(),(array)$val,true)) return 0;
+     if ($col==='revision' && (int)$this->db->dossier->getRevision()!==(int)$val) return 0;
+    }
+   }
+   $this->db->writes++; $this->db->operations[]=['table'=>$this->table,'sets'=>$this->sets]; return 1;
+  }
   public function __call($m,$a) { return $this; }
  }
  $session=new Session();$groups=new Groups();$config=new Config();$request=new Request();$db=new Database();
  $dossier=new \OCA\Coordination\Db\Dossier();$mapper=new \OCA\Coordination\Db\DossierMapper($dossier);$service=new \OCA\Coordination\Service\DossierService();
  $access=new \OCA\Coordination\Service\Access($session,$groups,$config);
- $ctrl=new \OCA\Coordination\Controller\DossierApiController('coordination',$request,$mapper,new \OCA\Coordination\Db\DossierChecklistMapper(),$service,$groups,$session,$db,$access);
+ $db->dossier=$dossier;$scans=new \OCA\Coordination\Service\ScanService();$logger=new Logger();
+ $ctrl=new \OCA\Coordination\Controller\DossierApiController('coordination',$request,$mapper,new \OCA\Coordination\Db\DossierChecklistMapper(),$service,$groups,$session,$db,$access,new \OCA\Coordination\Service\DossierLock($db),$scans,$logger);
  $n=0;function check($ok,$label){global $n;if(!$ok)throw new \RuntimeException($label);$n++;echo "PASS $label\n";}
  foreach(['admin','manager','coord','back','sales'] as $uid){$session->uid=$uid;check($access->canView(),"$uid recognized explicitly");}
  $session->uid='outsider';check(!$access->canManage()&&!$access->canView(),'partial group name does not grant manager rights');
@@ -91,5 +121,42 @@ namespace {
  check($access->roles()['sales']&&!$access->roles()['coord'],'CRM sales membership does not grant coordination writes');
  $config->v['group_coordinator']='other_exact_group';$session->uid='coord';check(!$access->roles()['coord'],'explicit configured group replaces default mapping');
  check(\OCA\Coordination\Service\Workflow::validAppointment('2028-02-29','09:15'),'valid leap day accepted');
+ $W='\OCA\Coordination\Service\Workflow';$config->v=[];
+ // --- 1.2.0 : attribution, concurrence, erreurs, scans ---
+ $session->uid='manager';$dossier->setStatus('collected');$dossier->setAssignedCoordinator('coord');
+ $request->p=['ids'=>[1],'assigned_coordinator'=>'other'];$r=$ctrl->batchAssign();
+ check($r->data['success']&&$r->data['updated_count']===0&&$r->data['skipped_count']===1,'batch assignment skips dossiers already sent to back-office');
+ $request->p=['wilaya'=>'16 - Alger','assigned_coordinator'=>'other'];$r=$ctrl->batchAssign();
+ check($r->data['updated_count']===0,'wilaya assignment never reassigns collected or validated dossiers');
+ $request->p=['assigned_coordinator'=>'other'];check($ctrl->assign(1)->status===409,'single reassignment of a collected dossier refused');
+ $dossier->setStatus('assigned');$db->operations=[];$request->p=['assigned_coordinator'=>null];$r=$ctrl->assign(1);
+ check($r->data['success']&&in_array('new',array_column($db->operations,'sets')[0],true),'removing the coordinator resets status to new');
+ $dossier->setAssignedCoordinator('coord');$request->p=['ids'=>[1],'assigned_coordinator'=>'other'];$r=$ctrl->batchAssign();
+ check($r->data['updated_count']===1,'batch assignment still updates dossiers in progress');
+ $dossier->setAssignedCoordinator('coord');
+ $request->p=['client_name'=>'Nouveau nom','revision'=>2];$before=$mapper->updates;$r=$ctrl->update(1);
+ check($r->status===409&&$mapper->updates===$before,'stale revision cannot overwrite a newer edit');
+ $request->p=['client_name'=>'Nouveau nom','revision'=>3];check($ctrl->update(1)->data['success'],'current revision accepted');
+ $request->p=['case_number'=>'DUP'];check($ctrl->update(1)->status===409,'renaming to an existing dossier number refused');
+ $request->p=['client_name'=>'  '];check($ctrl->update(1)->status===400,'client name cannot be blanked');
+ $session->uid='back';$dossier->setStatus('collected');$service->pieces[0]['backoffice_checked']=true;$db->affected=0;$before=$mapper->updates;
+ $request->p=['status'=>'validated'];$r=$ctrl->changeStatus(1);
+ check($r->status===409&&$mapper->updates===$before,'concurrent back-office decision detected and refused');
+ $request->p=['checklist_item_id'=>1,'role'=>'backoffice','checked'=>false];check($ctrl->updateChecklist(1)->status===409,'checklist write refused when dossier changed meanwhile');
+ $db->affected=null;
+ $session->uid='coord';$dossier->setStatus('appointment_set');$config->v['scan_required']='1';$service->pieces[0]['coordinator_checked']=true;
+ $request->p=['status'=>'collected'];$r=$ctrl->changeStatus(1);check($r->status===409&&str_contains($r->data['error'],'scannée'),'scan_required blocks collection without PDF');
+ $scans->counts[1]=1;$dossier->setStatus('appointment_set');check($ctrl->changeStatus(1)->data['success'],'scan_required satisfied by one PDF per mandatory piece');
+ $config->v=[];$scans->counts=[];
+ $session->uid='manager';$mapper->fail=new \RuntimeException('SQLSTATE[42S02] secret table coord_dossiers');$r=$ctrl->index();
+ check($r->status===500&&!str_contains($r->data['error'],'SQLSTATE')&&count($logger->logs)===1,'technical errors are logged, not shown to users');
+ $mapper->fail=null;
+ $request->p=[];check($ctrl->destroy(1)->data['success']&&$scans->removed===[1],'dossier deletion also removes its scans');
+ $roles=fn($u)=>(function() use($u,$session,$access){$session->uid=$u;return $access->roles();})();
+ check(!$W::canViewScans($roles('sales'),'sales','coord'),'sales cannot view scanned identity documents');
+ check($W::canViewScans($roles('back'),'back','coord')&&$W::canViewScans($roles('coord'),'coord','coord')&&!$W::canViewScans($roles('other'),'other','coord'),'back-office and assigned coordinator view scans, other coordinators do not');
+ check($W::scanUploadError($roles('coord'),'coord','coord','appointment_set')===null&&$W::scanUploadError($roles('coord'),'coord','coord','collected')!==null,'coordinator scans until the dossier is sent');
+ check($W::scanUploadError($roles('back'),'back','coord','appointment_set')!==null,'back-office cannot add coordinator scans');
+ check($W::scanDeleteError($roles('coord'),'coord','coord','assigned','manager')!==null&&$W::scanDeleteError($roles('manager'),'manager','coord','validated','coord')===null,'only author or manager deletes a scan');
  echo "$n checks passed\n";
 }
