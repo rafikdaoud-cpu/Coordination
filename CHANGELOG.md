@@ -1,5 +1,16 @@
 # Changements
 
+## 1.7.0 — 2026-11-04
+
+### Application Android
+
+- Nouveau dossier `android/` : application qui n'ouvre que Coordination (connexion
+  Nextcloud comprise), compilée par GitHub Actions et publiée dans la release
+  `android-latest`. Voir `android/README.md`.
+- Mode application dans l'app web (agent `CoordinationAndroid/`) : barre Nextcloud
+  masquée, bouton « ⎋ Déconnexion » dans l'en-tête Coordination.
+
+
 ## 1.6.0 — 2026-11-04
 
 ### Mode guidé sur smartphone : scan → valider → suivant

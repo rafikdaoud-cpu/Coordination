@@ -1,4 +1,4 @@
-# Coordination — Nextcloud — 1.6.0
+# Coordination — Nextcloud — 1.7.0
 
 Gestion des dossiers clients de CSM Taksit : attribution aux coordinateurs,
 appel et rendez-vous, collecte physique des pièces, puis contrôle Back-Office.
@@ -55,6 +55,12 @@ les autres coordinateurs n'y ont pas accès. Le coordinateur peut supprimer ses 
 jusqu'à la transmission ; ensuite seul le responsable le peut. Limites : PDF réel
 uniquement (contrôlé sur le serveur), 20 Mo par scan, 10 scans par pièce. Les fichiers
 sont dans les données privées de l'application Nextcloud (pas dans « Fichiers »).
+
+## Application Android
+
+L'application Android (`android/`) n'ouvre que Coordination : connexion Nextcloud, puis
+Coordination sans la barre Nextcloud ; toute autre page Nextcloud est bloquée. APK à
+télécharger depuis la release `android-latest` du dépôt. Détails : `android/README.md`.
 
 ## Rôles et droits
 

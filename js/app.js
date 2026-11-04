@@ -10,7 +10,7 @@
     const IN_ANDROID_APP = /CoordinationAndroid\//.test(navigator.userAgent);
     if (IN_ANDROID_APP) document.documentElement.classList.add('co-android');
 
-    const APP_VERSION = '1.6.0';
+    const APP_VERSION = '1.7.0';
     let initialized = false, dossierRequest = 0;
     let mutationBusy = false;
     let lastModalKey = '';
