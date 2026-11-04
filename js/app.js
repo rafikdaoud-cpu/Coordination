@@ -6,6 +6,10 @@
 (function () {
     'use strict';
 
+    // Ouverte depuis l'application Android Coordination : barre Nextcloud masquée, déconnexion dans l'en-tête.
+    const IN_ANDROID_APP = /CoordinationAndroid\//.test(navigator.userAgent);
+    if (IN_ANDROID_APP) document.documentElement.classList.add('co-android');
+
     const APP_VERSION = '1.6.0';
     let initialized = false, dossierRequest = 0;
     let mutationBusy = false;
@@ -308,6 +312,7 @@
                     </p>
                 </div>
                 <div class="co-actions">
+                    ${IN_ANDROID_APP ? `<a class="co-btn co-btn-secondary co-logout" href="${escapeHtml(OC.generateUrl('/logout') + '?requesttoken=' + encodeURIComponent(OC.requestToken || ''))}">⎋ Déconnexion</a>` : ''}
                     ${isRcoord ? `
                         <button class="co-btn co-btn-primary" id="btn-import-modal">📥 Importer Excel (.xlsx)</button>
                         <button class="co-btn co-btn-success" id="btn-new-dossier">➕ Nouveau Dossier</button>

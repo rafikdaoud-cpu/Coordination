@@ -783,3 +783,9 @@ html.co-docscan-open, html.co-docscan-open body { overflow: hidden !important; }
 .co-guided-actions button:disabled { opacity: .5; }
 .co-guided-missing { margin: 6px 0 12px 20px; }
 #coord-app-root .co-step-banner .btn-guided-scan { min-height: 50px; font-size: 16px; }
+
+/* --- Application Android : Coordination seule, sans la barre Nextcloud --- */
+html.co-android { --header-height: 0px !important; }
+html.co-android #header, html.co-android header#header, html.co-android .header-start, html.co-android #skip-actions { display: none !important; }
+html.co-android #content, html.co-android #content-vue, html.co-android .content { margin-top: 0 !important; padding-top: 0 !important; top: 0 !important; }
+html.co-android #coord-app-root .co-logout { text-decoration: none; display: inline-flex; align-items: center; min-height: 44px; }
