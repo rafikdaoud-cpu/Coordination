@@ -1,4 +1,4 @@
-# Coordination — Nextcloud — 1.7.0
+# Coordination — Nextcloud — 1.8.0
 
 Gestion des dossiers clients de CSM Taksit : attribution aux coordinateurs,
 appel et rendez-vous, collecte physique des pièces, puis contrôle Back-Office.

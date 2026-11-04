@@ -1,4 +1,4 @@
-# Installation / mise à jour de Coordination 1.6.0
+# Installation / mise à jour de Coordination 1.8.0
 
 Ce document décrit une opération à réaliser après sauvegarde et recette. La
 préparation du paquet n'a exécuté aucune commande sur le VPS. Les exemples utilisent
@@ -147,8 +147,10 @@ Utiliser des dossiers fictifs et trois comptes distincts.
    le relais. Tester sur fond clair, sous éclairage faible et avec une carte plastifiée
    pour comparer : sous le titre de l'écran caméra, « Détection OpenCV » doit apparaître
    quelques secondes après l'ouverture (premier scan : ≈ 10 Mo à télécharger en 4G).
-   S'il reste « Détection rapide », la raison s'affiche juste après (« OpenCV bloqué par
-   la sécurité du serveur (CSP …) », « fichier introuvable (HTTP 404) », « délai dépassé »).
+   S'il reste « Détection rapide », la raison s'affiche juste après : « worker refusé »
+   (CSP de page), « CSP des fichiers .js » (en-tête ajouté par le serveur web aux fichiers
+   statiques : le retirer pour `custom_apps/coordination/js/`), « fichier introuvable
+   (HTTP 404) » ou « délai dépassé ».
    Vérifier aussi que le fichier est servi :
    `curl -sI https://<votre-nextcloud>/custom_apps/coordination/js/vendor/opencv.js`
    (attendu : `HTTP/2 200` et `content-length: 10378215`, ou une taille compressée).

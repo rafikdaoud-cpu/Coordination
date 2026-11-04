@@ -114,6 +114,17 @@ Il n'y a pas eu d'essai intégré sur le Nextcloud du VPS, de test Safari/iOS, n
 charge multiutilisateur. La plage déclarée Nextcloud 25–36 provient de l'archive
 et n'est pas une certification de cette matrice.
 
+## Version 1.8.0 : OpenCV en Web Worker
+
+Constat sur Nextcloud 35 réel : la CSP des pages garde `script-src` sans `unsafe-eval`
+même avec `allowEvalScript(true)` ; OpenCV.js (embind `new Function`, WASM) échouait.
+`loadEngine()` démarre `js/docscan-worker.js`, qui fait `importScripts(docscan.js,
+vendor/opencv.js)` et répond aux messages `detect` (ImageData transférée). Les fichiers
+.js statiques ne reçoivent pas la CSP de page. `PageController` ne déclare plus que
+`worker-src 'self'`. Une seule analyse en cours à la fois (`detecting`) ; les résultats
+d'une autre échelle sont ignorés. Si le serveur web ajoute lui-même une CSP aux fichiers
+.js, le message « CSP des fichiers .js » l'indique : retirer cet en-tête pour `js/`.
+
 ## Version 1.6.0 : mode guidé et diagnostic OpenCV
 
 `startGuidedScan()` (js/app.js) pilote `CoordinationDocScan.open()` via son API

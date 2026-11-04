@@ -7,6 +7,9 @@ PHOTO=base64.b64decode('/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAA0JCgsKCA0LCgsODg0PEyAV
 from playwright.sync_api import sync_playwright
 root=Path(__file__).resolve().parents[1]
 out=Path(sys.argv[1] if len(sys.argv)>1 else '/tmp/coordination-previews');out.mkdir(parents=True,exist_ok=True)
+def static(rel):
+ """Gestionnaire à un paramètre servant un fichier du dépôt (fichier statique : aucune CSP)."""
+ return lambda route:route.fulfill(path=str(root/rel),content_type='application/javascript')
 def camera_video(path,w=640,h=480):
  """Fausse caméra (Y4M) : feuille blanche inclinée avec lignes de texte sur une table CLAIRE.
  Le détecteur rapide (option A) n'y voit rien : la prise automatique prouve qu'OpenCV (option B) fonctionne."""
@@ -36,8 +39,10 @@ with sync_playwright() as p:
    page.on('dialog',lambda d:d.accept('Pièce illisible') if d.type=='prompt' else d.accept())
    # Origine HTTPS simulée : la caméra n'est accessible qu'en contexte sécurisé, comme sur Nextcloud.
    # CSP proche de Nextcloud avec les autorisations demandées par PageController (eval pour OpenCV.js).
-   csp="default-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; media-src 'self' blob:"
-   page.route('https://coordination.test/js/vendor/opencv.js',lambda r:r.fulfill(path=str(root/'js/vendor/opencv.js'),content_type='application/javascript'))
+   # 'unsafe-eval' n'est là que pour les attentes de Playwright (wait_for_function) ; l'application, elle, passe par le
+   # worker. La CSP stricte des pages Nextcloud (sans unsafe-eval) est vérifiée par tests/browser-opencv.py.
+   csp="default-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; media-src 'self' blob:"
+   for js in ['js/vendor/opencv.js','js/docscan-worker.js','js/docscan.js']:page.route('https://coordination.test/'+js,static(js))
    page.route('https://coordination.test/',lambda r:r.fulfill(content_type='text/html',headers={'Content-Security-Policy':csp},body='<!doctype html><html lang="fr"><meta name="viewport" content="width=device-width,initial-scale=1"><body style="margin:0"><div id="coord-app-root" class="coord-app"></div></body></html>'))
    page.goto('https://coordination.test/')
    page.add_style_tag(content=(root/'css/app.css').read_text())
