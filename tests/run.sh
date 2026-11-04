@@ -9,8 +9,10 @@ done < <(find lib appinfo templates tests -type f -name '*.php' -print0)
 node --check js/app.js
 node --check js/communes.js
 node --check js/scanpdf.js
+node --check js/docscan.js
 "$php_bin" tests/import.php
 "$php_bin" tests/create.php
 "$php_bin" tests/scan.php
 node tests/pdf.js
-echo 'Syntaxe PHP/JavaScript et 108 contrôles automatisés réussis.'
+node tests/docscan.js
+echo 'Syntaxe PHP/JavaScript et 119 contrôles automatisés réussis.'

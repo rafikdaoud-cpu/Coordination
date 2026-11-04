@@ -7,14 +7,35 @@ PHOTO=base64.b64decode('/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAA0JCgsKCA0LCgsODg0PEyAV
 from playwright.sync_api import sync_playwright
 root=Path(__file__).resolve().parents[1]
 out=Path(sys.argv[1] if len(sys.argv)>1 else '/tmp/coordination-previews');out.mkdir(parents=True,exist_ok=True)
+def camera_video(path,w=640,h=480):
+ """Fausse caméra (Y4M) : feuille claire inclinée avec lignes de texte sur une table sombre."""
+ q=[(170,70),(470,95),(455,420),(150,400)]
+ def inside(x,y):
+  s=0
+  for i in range(4):
+   (ax,ay),(bx,by)=q[i],q[(i+1)%4];c=(bx-ax)*(y-ay)-(by-ay)*(x-ax)
+   if c:
+    if s and (c>0)!=(s>0):return False
+    s=c
+  return True
+ Y=bytearray(w*h)
+ for y in range(h):
+  for x in range(w):Y[y*w+x]=(60 if (y%14<3 and 40<(x*7+y)%200<180) else 225) if inside(x,y) else 45+(x+y)//40
+ with open(path,'wb') as f:
+  f.write(b'YUV4MPEG2 W%d H%d F10:1 Ip A1:1 C420jpeg\n'%(w,h))
+  for _ in range(3):f.write(b'FRAME\n'+bytes(Y)+bytes([128])*(w*h//2))
+ return path
+video=camera_video(str(out/'fake-camera.y4m'))
 with sync_playwright() as p:
- browser=p.chromium.launch(executable_path=os.environ.get('CHROMIUM_BIN') or None,headless=True,args=['--no-sandbox'])
+ browser=p.chromium.launch(executable_path=os.environ.get('CHROMIUM_BIN') or None,headless=True,args=['--no-sandbox','--use-fake-ui-for-media-stream','--use-fake-device-for-media-stream','--use-file-for-fake-video-capture='+video])
  for role in ['coord','back','manager']:
   for width,height in [(360,800),(390,844),(1280,900)]:
    page=browser.new_page(viewport={'width':width,'height':height});errors=[]
    page.on('pageerror',lambda e:errors.append(str(e)))
    page.on('dialog',lambda d:d.accept('Pièce illisible') if d.type=='prompt' else d.accept())
-   page.set_content('<!doctype html><html lang="fr"><meta name="viewport" content="width=device-width,initial-scale=1"><body style="margin:0"><div id="coord-app-root" class="coord-app"></div></body></html>')
+   # Origine HTTPS simulée : la caméra n'est accessible qu'en contexte sécurisé, comme sur Nextcloud.
+   page.route('https://coordination.test/**',lambda r:r.fulfill(content_type='text/html',body='<!doctype html><html lang="fr"><meta name="viewport" content="width=device-width,initial-scale=1"><body style="margin:0"><div id="coord-app-root" class="coord-app"></div></body></html>'))
+   page.goto('https://coordination.test/')
    page.add_style_tag(content=(root/'css/app.css').read_text())
    page.evaluate('''role=>{
     window.OC={requestToken:'test',generateUrl:p=>'/'+p};window.fixture={role,failWrite:false};
@@ -37,7 +58,7 @@ with sync_playwright() as p:
      return{ok:true,status:200,text:async()=>JSON.stringify(data)};
     };
    }''',role)
-   page.add_script_tag(content=(root/'js/communes.js').read_text());page.add_script_tag(content=(root/'js/scanpdf.js').read_text());page.add_script_tag(content=(root/'js/app.js').read_text())
+   page.add_script_tag(content=(root/'js/communes.js').read_text());page.add_script_tag(content=(root/'js/scanpdf.js').read_text());page.add_script_tag(content=(root/'js/docscan.js').read_text());page.add_script_tag(content=(root/'js/app.js').read_text())
    page.locator('.co-table tbody tr').first.wait_for()
    assert not page.evaluate('window.xss') and page.locator('#coord-app-root img').count()==0,'coordinator display name injected HTML'
    assert page.locator('.co-table tbody tr').count()==15
@@ -70,6 +91,15 @@ with sync_playwright() as p:
     # Étape 2 : scanner puis valider
     assert page.locator('#piece-1 [data-role=coordinator]').is_disabled(),'piece can be validated before its scan'
     assert page.locator('#btn-action-collected').is_disabled()
+    # Scanner en direct : la fausse caméra montre une feuille inclinée, la photo doit partir seule.
+    page.locator('#piece-1 .btn-live-scan').click();page.locator('.co-docscan').wait_for()
+    page.wait_for_function("document.querySelector('.co-docscan-count')?.textContent.includes('1 page')",timeout=15000)
+    assert page.locator('.co-docscan-shutter').evaluate('e=>{const r=e.getBoundingClientRect();return r.width>=64&&r.bottom<=innerHeight}'),'shutter not reachable'
+    page.screenshot(path=str(out/f'{role}-{width}-live.png'),full_page=False)
+    page.locator('.co-docscan-done').click();page.wait_for_function("!document.querySelector('.co-docscan') && document.querySelectorAll('#piece-1 .co-scan-thumbs img').length===1")
+    dims=page.locator('#piece-1 .co-scan-thumbs img').evaluate('i=>i.decode().then(()=>[i.naturalWidth,i.naturalHeight])')
+    assert dims[1]>dims[0] and 1.0<dims[1]/dims[0]<1.35,('sheet not straightened to its own shape',dims)
+    page.locator('.btn-scan-cancel').click();page.wait_for_function("!document.querySelector('#piece-1 .co-scan-session')")
     page.locator('#piece-1 .scan-photo-input').set_input_files([{'name':'photo1.jpg','mimeType':'image/jpeg','buffer':PHOTO}])
     page.locator('#piece-1 .co-scan-thumbs img').first.wait_for()
     page.locator('#piece-1 .scan-photo-input').set_input_files([{'name':'photo2.jpg','mimeType':'image/jpeg','buffer':PHOTO}])

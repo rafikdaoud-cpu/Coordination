@@ -1,4 +1,4 @@
-# Reprise technique — Coordination 1.3.0
+# Reprise technique — Coordination 1.4.0
 
 ## Demande et périmètre
 
@@ -113,6 +113,21 @@ de démonstration.
 Il n'y a pas eu d'essai intégré sur le Nextcloud du VPS, de test Safari/iOS, ni de
 charge multiutilisateur. La plage déclarée Nextcloud 25–36 provient de l'archive
 et n'est pas une certification de cette matrice.
+
+## Version 1.4.0 : scanner en direct (option A)
+
+`js/docscan.js` (`window.CoordinationDocScan`) : `getUserMedia` caméra arrière, analyse
+toutes les 100 ms sur une image de 320 px (gris, flou boîte ×2, seuil d'Otsu, plus grande
+composante ne touchant pas le bord, enveloppe convexe, quadrilatère d'aire maximale,
+contrôles : aire 10–97 %, remplissage, angles 45–135°). Déclenchement après 8 analyses
+stables (coins < 2 % de la largeur) ; réarmement quand la feuille disparaît ou bouge de
+plus de 10 %. Redressement par homographie et interpolation bilinéaire en pleine
+résolution (≤ 1 800 px), puis `CoordinationScan.canvasToPage`. Repli sur l'`input
+capture` natif (`.scan-photo-input`). La page déclare `camera 'self'` (FeaturePolicy).
+Limites : fond clair sous une feuille claire, reflets de plastification, pièce coupée par
+le cadre ; pas de torche pilotable sur iPhone. Option B si besoin : OpenCV.js (≈ 8 Mo,
+CSP `wasm-unsafe-eval` à prévoir). Tests : `tests/docscan.js` (images synthétiques) et
+fausse caméra Y4M dans `tests/browser-smoke.py`.
 
 ## Version 1.3.0 : parcours imposé RDV → scan → validation
 

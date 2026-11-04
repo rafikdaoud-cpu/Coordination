@@ -1,5 +1,21 @@
 # Changements
 
+## 1.4.0 — 2026-11-04
+
+### Scanner en direct avec détection automatique (option A)
+
+- « 📷 Scanner » ouvre la caméra arrière en plein écran dans l'application.
+- La feuille est détectée en temps réel (cadre jaune puis vert) ; la photo part
+  **seule** quand la feuille reste immobile ≈ 1 s, avec vibration et flash visuel.
+- Redressement automatique de la perspective et recadrage sur la feuille.
+- Recto puis verso : après une prise, retourner la pièce déclenche la page suivante.
+- Déclencheur manuel, interrupteurs « Auto » et « N&B », bouton « Terminer ».
+- Repli automatique sur l'appareil photo natif si la caméra est refusée ou indisponible.
+- Détection maison sans bibliothèque (`js/docscan.js`, ≈ 20 Ko) : feuille claire sur
+  fond plus sombre recommandée. En cas de ratés fréquents, l'option B (OpenCV.js) reste possible.
+- `PageController` autorise la caméra pour la page (Permissions-Policy `camera 'self'`).
+
+
 ## 1.3.0 — 2026-11-04
 
 ### Parcours coordinateur imposé : RDV → scan → validation

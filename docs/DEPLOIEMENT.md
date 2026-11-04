@@ -1,4 +1,4 @@
-# Installation / mise à jour de Coordination 1.3.0
+# Installation / mise à jour de Coordination 1.4.0
 
 Ce document décrit une opération à réaliser après sauvegarde et recette. La
 préparation du paquet n'a exécuté aucune commande sur le VPS. Les exemples utilisent
@@ -141,7 +141,11 @@ Utiliser des dossiers fictifs et trois comptes distincts.
    au dossier d'un autre coordinateur refusée.
 8. Parcours : sur le téléphone du coordinateur, vérifier qu'avant le RDV aucune
    pièce ne se scanne ni ne se valide ; enregistrer le RDV ; « 📷 Scanner »,
-   photographier 2 pages, « Envoyer le PDF », puis valider la pièce ; transmettre. Vérifier l'autorisation caméra, la
+   poser la pièce sur un fond sombre : la photo doit partir seule et la page être
+   redressée ; retourner pour le verso ; « Terminer », « Envoyer le PDF », valider la
+   pièce ; transmettre. Refuser la caméra une fois : l'appareil photo natif doit prendre
+   le relais. Tester sur fond clair, sous éclairage faible et avec une carte plastifiée
+   pour décider s'il faut passer à l'option B. Vérifier l'autorisation caméra, la
    rotation des photos, la lisibilité du PDF et la durée d'envoi en 4G. Essayer aussi
    « Galerie ou PDF » avec un PDF produit par l'application scanner du téléphone.
 9. BO : « Voir » ouvre le PDF dans un nouvel onglet, « Télécharger » l'enregistre.

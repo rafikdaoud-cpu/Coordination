@@ -6,7 +6,7 @@
 (function () {
     'use strict';
 
-    const APP_VERSION = '1.3.0';
+    const APP_VERSION = '1.4.0';
     let initialized = false, dossierRequest = 0;
     let mutationBusy = false;
     let lastModalKey = '';
@@ -633,6 +633,8 @@
                 </div></div>`;
         }).join('');
         const empty = !scans.length && !session ? `<div class="co-scan-empty">${canScan ? 'À scanner : photographiez la pièce (recto, puis verso si besoin).' : 'Aucun scan transmis.'}</div>` : '';
+        // Appareil photo natif : secours si le scanner en direct n'est pas disponible (caméra refusée, ancien navigateur).
+        const fallbackInput = `<input type="file" accept="image/*" capture="environment" class="co-file-input scan-photo-input" data-item="${itemId}" tabindex="-1" aria-hidden="true">`;
         let actions = '';
         if (canScan && session) {
             actions = `<div class="co-scan-session" aria-label="Scan en cours">
@@ -640,13 +642,13 @@
                     ${session.busy ? '<div class="co-scan-busy" role="status">⏳ Traitement…</div>' : ''}</div>
                 <label class="co-scan-option"><input type="checkbox" class="scan-doc-mode" ${state.scanDocMode ? 'checked' : ''}> Mode document (noir et blanc contrasté) pour les pages suivantes</label>
                 <div class="co-scan-actions">
-                    ${session.pages.length < 10 ? `<label class="co-btn co-btn-secondary co-file-btn">➕ Page suivante<input type="file" accept="image/*" capture="environment" class="co-file-input scan-photo-input" data-item="${itemId}"></label>` : '<span class="co-scan-limit">10 pages maximum</span>'}
+                    ${session.pages.length < 10 ? `<button type="button" class="co-btn co-btn-secondary btn-live-scan" data-item="${itemId}">➕ Page suivante</button>${fallbackInput}` : '<span class="co-scan-limit">10 pages maximum</span>'}
                     <button type="button" class="co-btn co-btn-success btn-scan-send" data-item="${itemId}" ${session.pages.length && !session.busy ? '' : 'disabled'}>✅ Envoyer le PDF (${session.pages.length} page${session.pages.length > 1 ? 's' : ''})</button>
                     <button type="button" class="co-btn co-btn-secondary btn-scan-cancel">Annuler</button>
                 </div></div>`;
         } else if (canScan) {
             actions = `<div class="co-scan-actions">
-                <label class="co-btn co-btn-primary co-file-btn">📷 Scanner<input type="file" accept="image/*" capture="environment" class="co-file-input scan-photo-input" data-item="${itemId}"></label>
+                <button type="button" class="co-btn co-btn-primary btn-live-scan" data-item="${itemId}">📷 Scanner</button>${fallbackInput}
                 <label class="co-btn co-btn-secondary co-file-btn">🖼️ Galerie ou PDF<input type="file" accept="image/*,application/pdf,.pdf" multiple class="co-file-input scan-pick-input" data-item="${itemId}"></label>
             </div>`;
         }
@@ -1611,7 +1613,36 @@
         }
     }
 
+    function openLiveScan(itemId) {
+        const fallback = () => document.querySelector(`#piece-${itemId} .scan-photo-input`)?.click();
+        if (!window.CoordinationDocScan || !window.CoordinationDocScan.supported()) { fallback(); return; }
+        if (scanSession && scanSession.itemId !== itemId) {
+            if (scanSession.pages.length && !confirm('Un scan d’une autre pièce n’est pas envoyé. L’abandonner ?')) return;
+            clearScanSession();
+        }
+        const item = (state.currentDossier.checklist || []).find(i => Number(i.id) === itemId);
+        window.CoordinationDocScan.open({
+            title: item ? item.document_label_fr : 'Pièce',
+            documentMode: state.scanDocMode,
+            maxPages: 10 - (scanSession ? scanSession.pages.length : 0),
+            onDocMode: (on) => { state.scanDocMode = on; },
+            onPage: async (canvas, documentMode) => {
+                const page = await window.CoordinationScan.canvasToPage(canvas, documentMode);
+                if (!scanSession || scanSession.itemId !== itemId) { clearScanSession(); scanSession = { itemId, pages: [], busy: false }; }
+                scanSession.pages.push(page);
+            },
+            onFallback: fallback,
+            onClose: (count) => {
+                render();
+                if (!count) return;
+                document.querySelector(`#piece-${itemId} .co-scan-session`)?.scrollIntoView({ block: 'nearest' });
+                feedback(`${count} page${count > 1 ? 's' : ''} prête${count > 1 ? 's' : ''}. Vérifiez les miniatures puis « ✅ Envoyer le PDF ».`, false);
+            },
+        });
+    }
+
     function bindScanEvents() {
+        document.querySelectorAll('.btn-live-scan').forEach(btn => btn.addEventListener('click', (e) => openLiveScan(Number(e.currentTarget.getAttribute('data-item')))));
         document.querySelectorAll('.scan-photo-input').forEach(input => input.addEventListener('change', async (e) => {
             const files = Array.from(e.target.files || []);
             const itemId = Number(e.target.getAttribute('data-item'));

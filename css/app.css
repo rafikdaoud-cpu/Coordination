@@ -733,3 +733,32 @@ input[type="time"].co-input::-webkit-calendar-picker-indicator {
 @media(max-width:768px){
  #coord-app-root .co-step-banner .co-btn{align-self:stretch}
 }
+
+/* --- 1.4.0 : scanner en direct (détection automatique de la feuille) --- */
+html.co-docscan-open, html.co-docscan-open body { overflow: hidden !important; }
+#coord-app-root .co-scan-actions { position: relative; }
+.co-docscan { position: fixed; inset: 0; z-index: 100000; display: flex; flex-direction: column; background: #000; color: #fff; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; touch-action: none; }
+.co-docscan-top, .co-docscan-bottom { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: rgba(0,0,0,.85); }
+.co-docscan-top { padding-top: max(10px, env(safe-area-inset-top)); }
+.co-docscan-bottom { justify-content: space-between; padding-bottom: max(14px, env(safe-area-inset-bottom)); }
+.co-docscan-title { flex: 1; min-width: 0; font-weight: 650; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.co-docscan-count { font-weight: 400; color: #cbd5e1; }
+.co-docscan-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.co-docscan-video, .co-docscan-overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+.co-docscan-video { object-fit: contain; background: #000; }
+.co-docscan-hint { position: absolute; left: 12px; right: 12px; bottom: 12px; padding: 10px 12px; border-radius: 12px; background: rgba(15,23,42,.78); font-size: 15px; text-align: center; }
+.co-docscan-flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
+.co-docscan-flash.is-on { animation: co-docscan-flash .35s ease-out; }
+@keyframes co-docscan-flash { from { opacity: .85; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .co-docscan-flash.is-on { animation: none; } }
+.co-docscan button { font: inherit; cursor: pointer; }
+.co-docscan-chip, .co-docscan-done, .co-docscan-close, .co-docscan-fallback { min-height: 46px; padding: 0 14px; border-radius: 23px; border: 1px solid rgba(255,255,255,.35); background: rgba(255,255,255,.12); color: #fff; font-size: 14px; }
+.co-docscan-close { min-width: 46px; padding: 0; font-size: 20px; }
+.co-docscan-done { background: #16a34a; border-color: #16a34a; font-weight: 650; }
+.co-docscan-shutter { width: 74px; height: 74px; flex: none; border-radius: 50%; border: 5px solid #fff; background: rgba(255,255,255,.25); box-shadow: 0 0 0 3px rgba(0,0,0,.5); }
+.co-docscan-shutter:active { background: #fff; }
+.co-docscan-shutter:disabled { opacity: .4; }
+.co-docscan button:focus-visible { outline: 3px solid #facc15; outline-offset: 2px; }
+.co-docscan-error { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; text-align: center; background: #0f172a; font-size: 15px; }
+.co-docscan-error[hidden] { display: none; }
+.co-docscan-fallback { background: #0f766e; border-color: #0f766e; font-weight: 650; }

@@ -1,4 +1,4 @@
-# Coordination — Nextcloud — 1.3.0
+# Coordination — Nextcloud — 1.4.0
 
 Gestion des dossiers clients de CSM Taksit : attribution aux coordinateurs,
 appel et rendez-vous, collecte physique des pièces, puis contrôle Back-Office.
@@ -27,9 +27,13 @@ La fiche guide le coordinateur, sur smartphone d'abord, dans cet ordre imposé p
    date et heure, « Enregistrer le Rendez-vous ». Le dossier passe « RDV fixé » et la
    fiche bascule sur l'onglet Pièces. Avant le RDV, aucune pièce ne peut être scannée
    ni validée.
-2. **② Pièces — scanner** : sous chaque pièce, **📷 Scanner** ouvre l'appareil photo
-   arrière. Une photo = une page ; **➕ Page suivante** pour un verso (10 pages maximum),
-   « mode document » noir et blanc possible, puis **✅ Envoyer le PDF**. Les photos sont
+2. **② Pièces — scanner** : sous chaque pièce, **📷 Scanner** ouvre la caméra arrière
+   en plein écran. Poser la pièce **à plat sur un fond sombre** : un cadre apparaît sur la
+   feuille, devient vert, et la photo part **toute seule** après ≈ 1 seconde d'immobilité.
+   La page est recadrée et redressée automatiquement. Retourner la pièce pour le verso,
+   puis **Terminer**, vérifier les miniatures et **✅ Envoyer le PDF** (10 pages maximum).
+   Le déclencheur rond permet une prise manuelle ; « Auto » et « N&B » se règlent en haut
+   et en bas de l'écran. Si la caméra est refusée, l'appareil photo du téléphone prend le relais. Les photos sont
    réduites et assemblées en PDF A4 sur le téléphone (environ 250 à 500 Ko par page).
    **🖼️ Galerie ou PDF** accepte des photos existantes ou un PDF d'une application de scan.
 3. **② Pièces — valider** : la case « Validée par le coordinateur » ne s'active

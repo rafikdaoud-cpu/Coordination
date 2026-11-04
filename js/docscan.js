@@ -1,0 +1,464 @@
+/**
+ * Coordination — scanner de documents en direct (option A, sans bibliothèque).
+ *
+ * Caméra arrière dans le navigateur, détection de la feuille à chaque image
+ * (≈ 10 par seconde sur une version réduite à 320 px), cadre affiché en surimpression,
+ * déclenchement automatique quand la feuille reste immobile ≈ 1 s, puis redressement
+ * (perspective) de la photo en pleine résolution.
+ *
+ * Détection : niveaux de gris, flou, seuil d'Otsu, plus grande zone claire (ou sombre)
+ * qui ne touche pas le bord, enveloppe convexe, quadrilatère d'aire maximale, contrôles
+ * de forme. Fonctionne bien pour une feuille claire sur un fond plus sombre.
+ */
+(function (root) {
+    'use strict';
+
+    const DETECT_SIDE = 320;     // px de l'image d'analyse
+    const DETECT_EVERY = 100;    // ms entre deux analyses
+    const STABLE_FRAMES = 8;     // ≈ 0,8 à 1 s immobile avant déclenchement
+    const MOVE_TOLERANCE = 0.02; // déplacement max d'un coin (fraction de la largeur)
+    const MAX_SIDE = 1800;       // px du côté long de la page redressée
+
+    // ---------- Analyse d'image (fonctions pures, testées sous Node) ----------
+
+    function toGray(rgba, w, h) {
+        const g = new Uint8Array(w * h);
+        for (let i = 0, j = 0; i < g.length; i++, j += 4) g[i] = (rgba[j] * 77 + rgba[j + 1] * 150 + rgba[j + 2] * 29) >> 8;
+        return g;
+    }
+
+    function boxBlur(src, w, h, r) {
+        const tmp = new Uint8Array(w * h), out = new Uint8Array(w * h), n = 2 * r + 1;
+        for (let y = 0; y < h; y++) {
+            const row = y * w; let acc = 0;
+            for (let x = -r; x <= r; x++) acc += src[row + Math.min(w - 1, Math.max(0, x))];
+            for (let x = 0; x < w; x++) {
+                tmp[row + x] = acc / n;
+                acc += src[row + Math.min(w - 1, x + r + 1)] - src[row + Math.max(0, x - r)];
+            }
+        }
+        for (let x = 0; x < w; x++) {
+            let acc = 0;
+            for (let y = -r; y <= r; y++) acc += tmp[Math.min(h - 1, Math.max(0, y)) * w + x];
+            for (let y = 0; y < h; y++) {
+                out[y * w + x] = acc / n;
+                acc += tmp[Math.min(h - 1, y + r + 1) * w + x] - tmp[Math.max(0, y - r) * w + x];
+            }
+        }
+        return out;
+    }
+
+    function otsu(g) {
+        const hist = new Float64Array(256);
+        for (let i = 0; i < g.length; i++) hist[g[i]]++;
+        let sum = 0; for (let i = 0; i < 256; i++) sum += i * hist[i];
+        let sumB = 0, wB = 0, best = -1, t = 127;
+        for (let i = 0; i < 256; i++) {
+            wB += hist[i]; if (!wB) continue;
+            const wF = g.length - wB; if (!wF) break;
+            sumB += i * hist[i];
+            const d = sumB / wB - (sum - sumB) / wF, between = wB * wF * d * d;
+            if (between > best) { best = between; t = i; }
+        }
+        return t;
+    }
+
+    /** Plus grande composante (4-connexe) du masque qui ne touche pas le bord de l'image. */
+    function innerComponent(mask, w, h) {
+        const label = new Int32Array(w * h), stack = new Int32Array(w * h);
+        let id = 0, best = null;
+        for (let s = 0; s < w * h; s++) {
+            if (!mask[s] || label[s]) continue;
+            id++; let sp = 0, area = 0, touches = false;
+            stack[sp++] = s; label[s] = id;
+            while (sp) {
+                const p = stack[--sp], x = p % w, y = (p - x) / w;
+                area++;
+                if (x === 0 || y === 0 || x === w - 1 || y === h - 1) touches = true;
+                if (x > 0 && mask[p - 1] && !label[p - 1]) { label[p - 1] = id; stack[sp++] = p - 1; }
+                if (x < w - 1 && mask[p + 1] && !label[p + 1]) { label[p + 1] = id; stack[sp++] = p + 1; }
+                if (y > 0 && mask[p - w] && !label[p - w]) { label[p - w] = id; stack[sp++] = p - w; }
+                if (y < h - 1 && mask[p + w] && !label[p + w]) { label[p + w] = id; stack[sp++] = p + w; }
+            }
+            if (!touches && (!best || area > best.area)) best = { id, area };
+        }
+        return best ? { label, id: best.id, area: best.area } : null;
+    }
+
+    function cross(o, a, b) { return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]); }
+
+    function convexHull(points) {
+        const p = points.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+        if (p.length < 3) return p;
+        const lower = [], upper = [];
+        for (const q of p) { while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], q) <= 0) lower.pop(); lower.push(q); }
+        for (let i = p.length - 1; i >= 0; i--) { const q = p[i]; while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], q) <= 0) upper.pop(); upper.push(q); }
+        return lower.slice(0, -1).concat(upper.slice(0, -1));
+    }
+
+    function polyArea(q) {
+        let a = 0;
+        for (let i = 0; i < q.length; i++) { const p = q[i], n = q[(i + 1) % q.length]; a += p[0] * n[1] - n[0] * p[1]; }
+        return Math.abs(a) / 2;
+    }
+
+    function isConvex(q) {
+        let sign = 0;
+        for (let i = 0; i < 4; i++) {
+            const c = cross(q[i], q[(i + 1) % 4], q[(i + 2) % 4]);
+            if (c === 0) return false;
+            if (sign && Math.sign(c) !== sign) return false;
+            sign = Math.sign(c);
+        }
+        return true;
+    }
+
+    function angleAt(a, b, c) {
+        const v1 = [a[0] - b[0], a[1] - b[1]], v2 = [c[0] - b[0], c[1] - b[1]];
+        const cos = (v1[0] * v2[0] + v1[1] * v2[1]) / (Math.hypot(...v1) * Math.hypot(...v2));
+        return Math.acos(Math.max(-1, Math.min(1, cos))) * 180 / Math.PI;
+    }
+
+    /** Quadrilatère d'aire maximale inscrit dans l'enveloppe : coins HG, HD, BD, BG. */
+    function quadFromHull(hull) {
+        const pick = (f) => hull.reduce((best, p) => f(p) > f(best) ? p : best, hull[0]);
+        let q = [pick(p => -(p[0] + p[1])), pick(p => p[0] - p[1]), pick(p => p[0] + p[1]), pick(p => p[1] - p[0])];
+        let area = isConvex(q) ? polyArea(q) : 0;
+        for (let iter = 0; iter < 3; iter++) {
+            let improved = false;
+            for (let i = 0; i < 4; i++) {
+                for (const p of hull) {
+                    const cand = q.slice(); cand[i] = p;
+                    if (!isConvex(cand)) continue;
+                    const a = polyArea(cand);
+                    if (a > area + 1e-9) { q = cand; area = a; improved = true; }
+                }
+            }
+            if (!improved) break;
+        }
+        return area > 0 ? q : null;
+    }
+
+    function tryPolarity(blur, w, h, t, bright) {
+        const mask = new Uint8Array(w * h);
+        for (let i = 0; i < mask.length; i++) mask[i] = bright ? blur[i] > t : blur[i] < t;
+        const comp = innerComponent(mask, w, h);
+        if (!comp || comp.area < 0.08 * w * h) return null;
+        const pts = [];
+        for (let y = 0; y < h; y++) {
+            let first = -1, last = -1;
+            for (let x = 0; x < w; x++) if (comp.label[y * w + x] === comp.id) { if (first < 0) first = x; last = x; }
+            if (first >= 0) { pts.push([first, y]); if (last !== first) pts.push([last, y]); }
+        }
+        const hull = convexHull(pts);
+        if (hull.length < 4) return null;
+        const q = quadFromHull(hull);
+        if (!q) return null;
+        const qa = polyArea(q), ha = polyArea(hull);
+        if (qa < 0.1 * w * h || qa > 0.97 * w * h) return null;   // trop petit / toute l'image
+        if (qa / ha < 0.88) return null;                         // la zone n'est pas un quadrilatère
+        if (comp.area / qa < 0.55) return null;                  // trop de trous : pas une feuille
+        for (let i = 0; i < 4; i++) {
+            const ang = angleAt(q[(i + 3) % 4], q[i], q[(i + 1) % 4]);
+            if (ang < 45 || ang > 135) return null;
+            if (Math.hypot(q[i][0] - q[(i + 1) % 4][0], q[i][1] - q[(i + 1) % 4][1]) < 0.15 * Math.min(w, h)) return null;
+        }
+        return { quad: q, score: comp.area };
+    }
+
+    /** Coins [[x,y]×4] (HG, HD, BD, BG) de la feuille dans l'image grise, ou null. */
+    function detectQuad(gray, w, h) {
+        const blur = boxBlur(boxBlur(gray, w, h, 2), w, h, 2);
+        const t = otsu(blur);
+        const bright = tryPolarity(blur, w, h, t, true);
+        const dark = bright ? null : tryPolarity(blur, w, h, t, false);
+        const found = bright || dark;
+        return found ? found.quad : null;
+    }
+
+    /** Homographie (h33 = 1) envoyant les 4 points from[i] sur to[i]. */
+    function homography(from, to) {
+        const A = [], b = [];
+        for (let i = 0; i < 4; i++) {
+            const [x, y] = from[i], [u, v] = to[i];
+            A.push([x, y, 1, 0, 0, 0, -u * x, -u * y]); b.push(u);
+            A.push([0, 0, 0, x, y, 1, -v * x, -v * y]); b.push(v);
+        }
+        for (let c = 0; c < 8; c++) {
+            let piv = c;
+            for (let r = c + 1; r < 8; r++) if (Math.abs(A[r][c]) > Math.abs(A[piv][c])) piv = r;
+            [A[c], A[piv]] = [A[piv], A[c]]; [b[c], b[piv]] = [b[piv], b[c]];
+            if (Math.abs(A[c][c]) < 1e-12) throw new Error('Points dégénérés');
+            for (let r = c + 1; r < 8; r++) {
+                const f = A[r][c] / A[c][c];
+                for (let k = c; k < 8; k++) A[r][k] -= f * A[c][k];
+                b[r] -= f * b[c];
+            }
+        }
+        const h = new Array(8);
+        for (let r = 7; r >= 0; r--) {
+            let s = b[r];
+            for (let k = r + 1; k < 8; k++) s -= A[r][k] * h[k];
+            h[r] = s / A[r][r];
+        }
+        return h.concat(1);
+    }
+
+    function applyH(H, x, y) {
+        const d = H[6] * x + H[7] * y + H[8];
+        return [(H[0] * x + H[1] * y + H[2]) / d, (H[3] * x + H[4] * y + H[5]) / d];
+    }
+
+    /** Taille de la page redressée d'après les longueurs des côtés, plafonnée. */
+    function outputSize(q, maxSide) {
+        const d = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+        let W = Math.max(d(q[0], q[1]), d(q[3], q[2])), H = Math.max(d(q[0], q[3]), d(q[1], q[2]));
+        const s = Math.min(1, maxSide / Math.max(W, H));
+        return [Math.max(1, Math.round(W * s)), Math.max(1, Math.round(H * s))];
+    }
+
+    /** Redresse (interpolation bilinéaire) la zone quad de l'image RGBA src en W×H. */
+    function warpPixels(src, sw, sh, quad, W, H) {
+        const out = new Uint8ClampedArray(W * H * 4);
+        const M = homography([[0, 0], [W, 0], [W, H], [0, H]], quad);
+        for (let v = 0; v < H; v++) {
+            for (let u = 0; u < W; u++) {
+                const d = M[6] * (u + 0.5) + M[7] * (v + 0.5) + 1;
+                let x = (M[0] * (u + 0.5) + M[1] * (v + 0.5) + M[2]) / d - 0.5;
+                let y = (M[3] * (u + 0.5) + M[4] * (v + 0.5) + M[5]) / d - 0.5;
+                x = Math.max(0, Math.min(sw - 1.001, x)); y = Math.max(0, Math.min(sh - 1.001, y));
+                const x0 = x | 0, y0 = y | 0, fx = x - x0, fy = y - y0;
+                const i00 = (y0 * sw + x0) * 4, i10 = i00 + 4, i01 = i00 + sw * 4, i11 = i01 + 4;
+                const o = (v * W + u) * 4;
+                for (let c = 0; c < 3; c++) {
+                    const top = src[i00 + c] + (src[i10 + c] - src[i00 + c]) * fx;
+                    const bot = src[i01 + c] + (src[i11 + c] - src[i01 + c]) * fx;
+                    out[o + c] = top + (bot - top) * fy;
+                }
+                out[o + 3] = 255;
+            }
+        }
+        return out;
+    }
+
+    // ---------- Interface caméra (navigateur) ----------
+
+    function supported() {
+        return !!(root.isSecureContext && root.navigator && navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+    }
+
+    function el(tag, cls, text) {
+        const e = document.createElement(tag);
+        if (cls) e.className = cls;
+        if (text !== undefined) e.textContent = text;
+        return e;
+    }
+
+    /**
+     * Ouvre le scanner plein écran.
+     * opts : { title, documentMode, maxPages, onPage(canvas) → Promise, onFallback(), onDocMode(bool), onClose(count) }
+     */
+    function open(opts) {
+        const maxPages = Math.max(0, opts.maxPages ?? 10);
+        let stream = null, timer = 0, closed = false, capturing = false, count = 0;
+        let auto = true, docMode = !!opts.documentMode;
+        let lastQuad = null, stable = 0, armed = true, lostFrames = 0, capturedQuad = null;
+
+        const overlay = el('div', 'co-docscan');
+        overlay.setAttribute('role', 'dialog'); overlay.setAttribute('aria-modal', 'true'); overlay.setAttribute('aria-label', 'Scanner de document');
+        const top = el('div', 'co-docscan-top');
+        const title = el('div', 'co-docscan-title', opts.title || 'Scan');
+        const counter = el('span', 'co-docscan-count', '');
+        title.appendChild(counter);
+        const docBtn = el('button', 'co-docscan-chip', ''); docBtn.type = 'button';
+        const closeBtn = el('button', 'co-docscan-close', '✕'); closeBtn.type = 'button'; closeBtn.setAttribute('aria-label', 'Fermer le scanner');
+        top.append(title, docBtn, closeBtn);
+
+        const stage = el('div', 'co-docscan-stage');
+        const video = el('video', 'co-docscan-video');
+        video.setAttribute('playsinline', ''); video.setAttribute('muted', ''); video.muted = true; video.setAttribute('autoplay', '');
+        const canvas = el('canvas', 'co-docscan-overlay');
+        const hint = el('div', 'co-docscan-hint', 'Ouverture de la caméra…'); hint.setAttribute('role', 'status'); hint.setAttribute('aria-live', 'polite');
+        const flash = el('div', 'co-docscan-flash');
+        const error = el('div', 'co-docscan-error'); error.hidden = true;
+        stage.append(video, canvas, hint, flash, error);
+
+        const bottom = el('div', 'co-docscan-bottom');
+        const autoBtn = el('button', 'co-docscan-chip', ''); autoBtn.type = 'button';
+        const shutter = el('button', 'co-docscan-shutter', ''); shutter.type = 'button'; shutter.setAttribute('aria-label', 'Prendre la photo maintenant');
+        const doneBtn = el('button', 'co-docscan-done', ''); doneBtn.type = 'button';
+        bottom.append(autoBtn, shutter, doneBtn);
+        overlay.append(top, stage, bottom);
+
+        const detectCanvas = document.createElement('canvas');
+        const detectCtx = detectCanvas.getContext('2d', { willReadFrequently: true });
+
+        const refreshButtons = () => {
+            counter.textContent = count ? ` · ${count} page${count > 1 ? 's' : ''}` : '';
+            docBtn.textContent = docMode ? '◐ N&B : oui' : '◐ N&B : non';
+            docBtn.setAttribute('aria-pressed', String(docMode));
+            autoBtn.textContent = auto ? '⚡ Auto : oui' : '⚡ Auto : non';
+            autoBtn.setAttribute('aria-pressed', String(auto));
+            doneBtn.textContent = count ? `Terminer (${count})` : 'Terminer';
+            shutter.disabled = capturing || count >= maxPages || !stream;
+        };
+        const say = (text) => { if (hint.textContent !== text) hint.textContent = text; };
+
+        function stop() {
+            clearInterval(timer); timer = 0;
+            if (stream) stream.getTracks().forEach(t => t.stop());
+            stream = null; video.srcObject = null;
+        }
+
+        function close() {
+            if (closed) return;
+            closed = true; stop();
+            document.removeEventListener('visibilitychange', onVisibility);
+            overlay.remove();
+            document.documentElement.classList.remove('co-docscan-open');
+            if (opts.onClose) opts.onClose(count);
+        }
+
+        function showError(message) {
+            stop();
+            error.replaceChildren();
+            const p = el('p', '', message);
+            const fallback = el('button', 'co-docscan-fallback', '📷 Utiliser l’appareil photo du téléphone'); fallback.type = 'button';
+            fallback.addEventListener('click', () => { const cb = opts.onFallback; close(); if (cb) cb(); });
+            const retry = el('button', 'co-docscan-chip', '↻ Réessayer'); retry.type = 'button';
+            retry.addEventListener('click', () => { error.hidden = true; start(); });
+            error.append(p, fallback, retry);
+            error.hidden = false; hint.hidden = true;
+            refreshButtons();
+        }
+
+        async function start() {
+            hint.hidden = false; say('Ouverture de la caméra…');
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
+            } catch (err) {
+                const denied = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
+                showError(denied
+                    ? 'Accès à la caméra refusé. Autorisez la caméra pour ce site dans les réglages du navigateur, ou utilisez l’appareil photo du téléphone.'
+                    : 'Caméra indisponible sur cet appareil ou ce navigateur.');
+                return;
+            }
+            if (closed) { stop(); return; }
+            video.srcObject = stream;
+            try { await video.play(); } catch (e) { /* lecture auto déjà en cours */ }
+            refreshButtons();
+            timer = setInterval(tick, DETECT_EVERY);
+        }
+
+        function videoRect() {
+            const cw = stage.clientWidth, ch = stage.clientHeight, vw = video.videoWidth, vh = video.videoHeight;
+            const s = Math.min(cw / vw, ch / vh);
+            return { x: (cw - vw * s) / 2, y: (ch - vh * s) / 2, s, cw, ch };
+        }
+
+        function draw(quad, progress) {
+            const dpr = root.devicePixelRatio || 1;
+            const r = videoRect();
+            if (canvas.width !== Math.round(r.cw * dpr) || canvas.height !== Math.round(r.ch * dpr)) { canvas.width = Math.round(r.cw * dpr); canvas.height = Math.round(r.ch * dpr); }
+            const ctx = canvas.getContext('2d');
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.clearRect(0, 0, r.cw, r.ch);
+            if (!quad) return;
+            const k = video.videoWidth / detectCanvas.width;
+            ctx.beginPath();
+            quad.forEach((p, i) => { const x = r.x + p[0] * k * r.s, y = r.y + p[1] * k * r.s; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+            ctx.closePath();
+            const ok = progress >= 1;
+            ctx.fillStyle = ok ? 'rgba(34,197,94,.28)' : 'rgba(250,204,21,.18)';
+            ctx.strokeStyle = ok || progress > 0.5 ? '#22c55e' : '#facc15';
+            ctx.lineWidth = 4; ctx.fill(); ctx.stroke();
+        }
+
+        function moved(a, b, w) {
+            let m = 0;
+            for (let i = 0; i < 4; i++) m = Math.max(m, Math.hypot(a[i][0] - b[i][0], a[i][1] - b[i][1]));
+            return m / w;
+        }
+
+        function tick() {
+            if (closed || capturing || !video.videoWidth) return;
+            const k = DETECT_SIDE / Math.max(video.videoWidth, video.videoHeight);
+            const w = Math.round(video.videoWidth * k), h = Math.round(video.videoHeight * k);
+            if (detectCanvas.width !== w || detectCanvas.height !== h) { detectCanvas.width = w; detectCanvas.height = h; }
+            detectCtx.drawImage(video, 0, 0, w, h);
+            const quad = detectQuad(toGray(detectCtx.getImageData(0, 0, w, h).data, w, h), w, h);
+
+            if (!quad) { lostFrames++; stable = 0; lastQuad = null; } else { lostFrames = 0; }
+            if (quad && lastQuad && moved(quad, lastQuad, w) < MOVE_TOLERANCE) stable++; else if (quad) stable = 0;
+            if (quad) lastQuad = quad;
+            // Après une prise, attendre que la feuille change (retournée, retirée) avant de redéclencher.
+            if (!armed && (lostFrames >= 3 || (quad && capturedQuad && moved(quad, capturedQuad, w) > 0.1))) armed = true;
+
+            const progress = Math.min(1, stable / STABLE_FRAMES);
+            draw(quad, auto && armed ? progress : 0);
+            if (count >= maxPages) say(`${maxPages} pages maximum : appuyez sur Terminer.`);
+            else if (!quad) say(armed ? 'Posez la pièce à plat sur un fond sombre, entièrement visible.' : '✓ Page prise. Retournez la pièce pour le verso, ou Terminer.');
+            else if (!auto) say('Document détecté : appuyez sur le déclencheur.');
+            else if (!armed) say('✓ Page prise. Retournez la pièce pour le verso, ou Terminer.');
+            else say(progress < 1 ? 'Document détecté : ne bougez plus…' : 'Prise de vue…');
+
+            if (auto && armed && quad && stable >= STABLE_FRAMES && count < maxPages) capture(quad);
+        }
+
+        async function capture(detectedQuad) {
+            if (capturing || closed || !video.videoWidth) return;
+            capturing = true; refreshButtons();
+            try {
+                const vw = video.videoWidth, vh = video.videoHeight;
+                const frame = document.createElement('canvas'); frame.width = vw; frame.height = vh;
+                const fctx = frame.getContext('2d', { willReadFrequently: true });
+                fctx.drawImage(video, 0, 0, vw, vh);
+                flash.classList.remove('is-on'); void flash.offsetWidth; flash.classList.add('is-on');
+                if (root.navigator && navigator.vibrate) navigator.vibrate(40);
+                let page;
+                if (detectedQuad) {
+                    const k = vw / detectCanvas.width;
+                    const quad = detectedQuad.map(p => [p[0] * k, p[1] * k]);
+                    const [W, H] = outputSize(quad, MAX_SIDE);
+                    const pixels = warpPixels(fctx.getImageData(0, 0, vw, vh).data, vw, vh, quad, W, H);
+                    page = document.createElement('canvas'); page.width = W; page.height = H;
+                    page.getContext('2d').putImageData(new ImageData(pixels, W, H), 0, 0);
+                } else {
+                    page = frame; // déclenchement manuel sans détection : image entière
+                }
+                if (page !== frame) frame.width = frame.height = 0; // libère la mémoire
+                await opts.onPage(page, docMode);
+                count++;
+                capturedQuad = detectedQuad; armed = false; stable = 0;
+            } catch (err) {
+                console.error('DocScan capture:', err);
+                say('Prise de vue impossible : réessayez.');
+            } finally {
+                capturing = false; refreshButtons();
+            }
+        }
+
+        function onVisibility() {
+            if (closed) return;
+            if (document.hidden) stop();
+            else if (!stream && error.hidden) start();
+        }
+
+        closeBtn.addEventListener('click', close);
+        doneBtn.addEventListener('click', close);
+        shutter.addEventListener('click', () => capture(lastQuad));
+        autoBtn.addEventListener('click', () => { auto = !auto; stable = 0; refreshButtons(); });
+        docBtn.addEventListener('click', () => { docMode = !docMode; if (opts.onDocMode) opts.onDocMode(docMode); refreshButtons(); });
+        overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+        document.addEventListener('visibilitychange', onVisibility);
+
+        document.documentElement.classList.add('co-docscan-open');
+        document.body.appendChild(overlay);
+        refreshButtons();
+        closeBtn.focus();
+        start();
+        return { close };
+    }
+
+    root.CoordinationDocScan = { supported, open, detectQuad, homography, applyH, warpPixels, outputSize, toGray, DETECT_SIDE };
+})(typeof window !== 'undefined' ? window : globalThis);

@@ -67,20 +67,18 @@
     }
 
     /**
-     * Photo → page JPEG réduite. Option « document » : niveaux de gris et contraste
-     * renforcé, plus lisible et plus léger pour du texte.
+     * Canvas → page JPEG réduite (côté long ≤ MAX_SIDE). Option « document » : niveaux
+     * de gris et contraste renforcé, plus lisible et plus léger pour du texte.
      */
-    async function photoToPage(file, documentMode) {
-        const img = await decode(file);
-        const w0 = img.width || img.naturalWidth, h0 = img.height || img.naturalHeight;
+    async function canvasToPage(source, documentMode) {
+        const w0 = source.width, h0 = source.height;
         if (!w0 || !h0) throw new Error('Image illisible');
         const ratio = Math.min(1, MAX_SIDE / Math.max(w0, h0));
         const width = Math.max(1, Math.round(w0 * ratio)), height = Math.max(1, Math.round(h0 * ratio));
         const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
         const ctx = canvas.getContext('2d');
         ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, width, height);
-        ctx.drawImage(img, 0, 0, width, height);
-        if (img.close) img.close();
+        ctx.drawImage(source, 0, 0, width, height);
         if (documentMode) {
             const data = ctx.getImageData(0, 0, width, height), px = data.data;
             for (let i = 0; i < px.length; i += 4) {
@@ -95,5 +93,15 @@
         return { jpeg: new Uint8Array(await blob.arrayBuffer()), width, height, preview: URL.createObjectURL(blob) };
     }
 
-    root.CoordinationScan = { buildPdf, photoToPage, MAX_SIDE, QUALITY };
+    /** Photo (fichier) → page JPEG, orientation EXIF appliquée. */
+    async function photoToPage(file, documentMode) {
+        const img = await decode(file);
+        const w = img.width || img.naturalWidth, h = img.height || img.naturalHeight;
+        const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0);
+        if (img.close) img.close();
+        try { return await canvasToPage(canvas, documentMode); } finally { canvas.width = canvas.height = 0; }
+    }
+
+    root.CoordinationScan = { buildPdf, photoToPage, canvasToPage, MAX_SIDE, QUALITY };
 })(typeof window !== 'undefined' ? window : globalThis);
