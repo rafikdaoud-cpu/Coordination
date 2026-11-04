@@ -55,3 +55,25 @@ ok(S.outputSize([[0, 0], [4000, 0], [4000, 3000], [0, 3000]], 1800).join() === '
 let t = Date.now(); for (let i = 0; i < 20; i++) S.detectQuad(scene(W, H, [[90, 40], [230, 52], [222, 210], [80, 196]], 60, 225, i), W, H);
 const ms = (Date.now() - t) / 20; ok(ms < 40, `detection fast enough for live preview (${ms.toFixed(1)} ms/frame on this machine)`);
 console.log(n + ' document detection checks passed');
+
+// ---------- Option B : OpenCV.js ----------
+(async () => {
+  const { cv } = await S.whenReady(require('../js/vendor/opencv.js'));
+  const rgba = (g) => { const o = new Uint8ClampedArray(g.length * 4); for (let i = 0; i < g.length; i++) { o[i * 4] = o[i * 4 + 1] = o[i * 4 + 2] = g[i]; o[i * 4 + 3] = 255; } return o; };
+  const w = 480, h = 360, sc = (q) => q.map(p => [p[0] * 1.5, p[1] * 1.5]);
+  let m = 0; const okB = (c, label) => { assert.ok(c, label); m++; console.log('PASS ' + label); };
+  let q = sc([[90, 40], [230, 52], [222, 210], [80, 196]]);
+  let d = S.detectQuadCV(cv, rgba(scene(w, h, q)), w, h);
+  okB(d && near(d, q, 7), 'OpenCV: tilted sheet found with ordered corners');
+  // Cas difficile pour le détecteur rapide : feuille blanche sur table claire.
+  q = sc([[95, 45], [225, 55], [220, 205], [85, 195]]);
+  const light = scene(w, h, q, 185, 238);
+  okB(S.detectQuad(scene(320, 240, [[95, 45], [225, 55], [220, 205], [85, 195]], 185, 238), 320, 240) === null, 'fast detector misses white sheet on light table (reason for option B)');
+  d = S.detectQuadCV(cv, rgba(light), w, h);
+  okB(d && near(d, q, 8), 'OpenCV: white sheet on light table found');
+  okB(S.detectQuadCV(cv, rgba(scene(w, h, null)), w, h) === null, 'OpenCV: empty table, nothing detected');
+  okB(S.detectQuadCV(cv, rgba(scene(w, h, [[-30, 30], [300, 30], [300, 330], [-30, 330]])), w, h) === null, 'OpenCV: sheet cut by the frame edge is not captured');
+  let t = Date.now(); for (let i = 0; i < 10; i++) S.detectQuadCV(cv, rgba(scene(w, h, q, 60, 225, i)), w, h);
+  const ms = (Date.now() - t) / 10; okB(ms < 60, `OpenCV detection fast enough (${ms.toFixed(1)} ms/frame here)`);
+  console.log(m + ' OpenCV detection checks passed');
+})().catch(e => { console.error(e); process.exit(1); });

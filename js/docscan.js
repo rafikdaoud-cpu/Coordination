@@ -13,7 +13,8 @@
 (function (root) {
     'use strict';
 
-    const DETECT_SIDE = 320;     // px de l'image d'analyse
+    const DETECT_SIDE = 320;     // px de l'image d'analyse (détecteur rapide)
+    const CV_DETECT_SIDE = 480;  // px de l'image d'analyse (OpenCV)
     const DETECT_EVERY = 100;    // ms entre deux analyses
     const STABLE_FRAMES = 8;     // ≈ 0,8 à 1 s immobile avant déclenchement
     const MOVE_TOLERANCE = 0.02; // déplacement max d'un coin (fraction de la largeur)
@@ -155,15 +156,120 @@
         const q = quadFromHull(hull);
         if (!q) return null;
         const qa = polyArea(q), ha = polyArea(hull);
-        if (qa < 0.1 * w * h || qa > 0.97 * w * h) return null;   // trop petit / toute l'image
+        if (!validQuad(q, w, h)) return null;
         if (qa / ha < 0.88) return null;                         // la zone n'est pas un quadrilatère
         if (comp.area / qa < 0.55) return null;                  // trop de trous : pas une feuille
+        return { quad: q, score: comp.area };
+    }
+
+    /** Contrôles de forme communs aux deux moteurs : taille, angles, côtés, convexité. */
+    function validQuad(q, w, h) {
+        if (!q || q.length !== 4 || !isConvex(q)) return false;
+        const qa = polyArea(q);
+        if (qa < 0.1 * w * h || qa > 0.97 * w * h) return false; // trop petit / toute l'image
         for (let i = 0; i < 4; i++) {
             const ang = angleAt(q[(i + 3) % 4], q[i], q[(i + 1) % 4]);
-            if (ang < 45 || ang > 135) return null;
-            if (Math.hypot(q[i][0] - q[(i + 1) % 4][0], q[i][1] - q[(i + 1) % 4][1]) < 0.15 * Math.min(w, h)) return null;
+            if (ang < 45 || ang > 135) return false;
+            if (Math.hypot(q[i][0] - q[(i + 1) % 4][0], q[i][1] - q[(i + 1) % 4][1]) < 0.15 * Math.min(w, h)) return false;
         }
-        return { quad: q, score: comp.area };
+        return true;
+    }
+
+    /** Ordonne 4 points en HG, HD, BD, BG (sens horaire à l'écran, HG = plus petit x + y). */
+    function orderCorners(pts) {
+        const cx = pts.reduce((a, p) => a + p[0], 0) / 4, cy = pts.reduce((a, p) => a + p[1], 0) / 4;
+        const sorted = pts.slice().sort((a, b) => Math.atan2(a[1] - cy, a[0] - cx) - Math.atan2(b[1] - cy, b[0] - cx));
+        let start = 0;
+        sorted.forEach((p, i) => { if (p[0] + p[1] < sorted[start][0] + sorted[start][1]) start = i; });
+        return sorted.slice(start).concat(sorted.slice(0, start));
+    }
+
+    // ---------- Option B : moteur OpenCV.js (chargé à la demande) ----------
+
+    /**
+     * Détection par contours : flou, Canny, dilatation, contours, polygone à 4 sommets
+     * convexe le plus grand. Repère une feuille même sur un fond clair, tant que son bord
+     * forme un contour. rgba : données RGBA (ImageData.data).
+     */
+    function detectQuadCV(cv, rgba, w, h) {
+        const mats = [];
+        const keep = (m) => (mats.push(m), m);
+        try {
+            const src = keep(cv.matFromImageData({ data: rgba, width: w, height: h }));
+            const gray = keep(new cv.Mat()), blur = keep(new cv.Mat()), edges = keep(new cv.Mat());
+            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+            cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
+            const kernel = keep(cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3)));
+            let best = null, bestArea = 0;
+            // Deux réglages de Canny : contraste normal, puis faible (feuille claire sur fond clair).
+            for (const [lo, hi] of [[50, 150], [15, 45]]) {
+                cv.Canny(blur, edges, lo, hi);
+                cv.dilate(edges, edges, kernel);
+                const contours = keep(new cv.MatVector()), hier = keep(new cv.Mat());
+                cv.findContours(edges, contours, hier, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+                for (let i = 0; i < contours.size(); i++) {
+                    const c = contours.get(i);
+                    const area = cv.contourArea(c);
+                    if (area > bestArea && area > 0.1 * w * h) {
+                        const approx = new cv.Mat();
+                        cv.approxPolyDP(c, approx, 0.02 * cv.arcLength(c, true), true);
+                        if (approx.rows === 4 && cv.isContourConvex(approx)) {
+                            const d = approx.data32S;
+                            const q = orderCorners([[d[0], d[1]], [d[2], d[3]], [d[4], d[5]], [d[6], d[7]]]);
+                            if (validQuad(q, w, h) && q.every(p => p[0] > 1 && p[1] > 1 && p[0] < w - 2 && p[1] < h - 2)) { best = q; bestArea = area; }
+                        }
+                        approx.delete();
+                    }
+                    c.delete();
+                }
+                if (best) break;
+            }
+            return best;
+        } finally {
+            mats.forEach(m => { try { m.delete(); } catch (e) { /* déjà libéré */ } });
+        }
+    }
+
+    /**
+     * Attend l'initialisation du module OpenCV. Attention : le module expose un « then »
+     * qui se résout sur lui-même ; un await direct bouclerait sans fin. On attend donc
+     * onRuntimeInitialized et on ne transmet le module qu'enveloppé ({ cv }).
+     */
+    function whenReady(cv) {
+        return new Promise((ok, ko) => {
+            if (!cv) { ko(new Error('OpenCV absent')); return; }
+            if (cv.Mat) { ok({ cv }); return; }
+            const previous = cv.onRuntimeInitialized;
+            cv.onRuntimeInitialized = () => { if (previous) previous(); ok({ cv }); };
+        });
+    }
+
+    let enginePromise = null;
+    /** Charge opencv.js une seule fois ; résout { cv }, ou rejette (réseau, CSP, mémoire). */
+    function loadOpenCV(url) {
+        if (enginePromise) return enginePromise;
+        enginePromise = new Promise((resolve, reject) => {
+            if (root.cv && root.cv.Mat) { resolve({ cv: root.cv }); return; }
+            const savedDefine = root.define; // une page avec AMD empêcherait opencv.js de publier window.cv
+            root.define = undefined;
+            const script = document.createElement('script');
+            script.src = url; script.async = true;
+            const timeout = setTimeout(() => reject(new Error('Chargement OpenCV trop long')), 90000);
+            script.onerror = () => { clearTimeout(timeout); root.define = savedDefine; reject(new Error('OpenCV introuvable')); };
+            script.onload = () => {
+                root.define = savedDefine;
+                whenReady(root.cv).then((wrapped) => { clearTimeout(timeout); resolve(wrapped); }, (err) => { clearTimeout(timeout); reject(err); });
+            };
+            document.head.appendChild(script);
+        });
+        enginePromise.catch(() => { enginePromise = null; });
+        return enginePromise;
+    }
+
+    function opencvUrl() {
+        const cfg = root.CoordinationDocScanConfig || {};
+        if (cfg.opencvUrl !== undefined) return cfg.opencvUrl;
+        return root.OC && OC.linkTo ? OC.linkTo('coordination', 'js/vendor/opencv.js') : null;
     }
 
     /** Coins [[x,y]×4] (HG, HD, BD, BG) de la feuille dans l'image grise, ou null. */
@@ -263,6 +369,8 @@
         let stream = null, timer = 0, closed = false, capturing = false, count = 0;
         let auto = true, docMode = !!opts.documentMode;
         let lastQuad = null, stable = 0, armed = true, lostFrames = 0, capturedQuad = null;
+        let cv = null, engineState = 'light';
+        const url = opencvUrl();
 
         const overlay = el('div', 'co-docscan');
         overlay.setAttribute('role', 'dialog'); overlay.setAttribute('aria-modal', 'true'); overlay.setAttribute('aria-label', 'Scanner de document');
@@ -271,8 +379,10 @@
         const counter = el('span', 'co-docscan-count', '');
         title.appendChild(counter);
         const docBtn = el('button', 'co-docscan-chip', ''); docBtn.type = 'button';
+        const engineTag = el('span', 'co-docscan-engine', '');
         const closeBtn = el('button', 'co-docscan-close', '✕'); closeBtn.type = 'button'; closeBtn.setAttribute('aria-label', 'Fermer le scanner');
         top.append(title, docBtn, closeBtn);
+        title.appendChild(engineTag);
 
         const stage = el('div', 'co-docscan-stage');
         const video = el('video', 'co-docscan-video');
@@ -294,6 +404,7 @@
         const detectCtx = detectCanvas.getContext('2d', { willReadFrequently: true });
 
         const refreshButtons = () => {
+            engineTag.textContent = engineState === 'opencv' ? 'Détection OpenCV' : engineState === 'loading' ? 'Détection rapide · chargement OpenCV…' : 'Détection rapide';
             counter.textContent = count ? ` · ${count} page${count > 1 ? 's' : ''}` : '';
             docBtn.textContent = docMode ? '◐ N&B : oui' : '◐ N&B : non';
             docBtn.setAttribute('aria-pressed', String(docMode));
@@ -348,6 +459,11 @@
             try { await video.play(); } catch (e) { /* lecture auto déjà en cours */ }
             refreshButtons();
             timer = setInterval(tick, DETECT_EVERY);
+            if (url && !cv && engineState !== 'loading') {
+                engineState = 'loading'; refreshButtons();
+                loadOpenCV(url).then((lib) => { if (closed) return; cv = lib.cv; engineState = 'opencv'; stable = 0; lastQuad = null; refreshButtons(); })
+                    .catch((err) => { console.warn('OpenCV indisponible, détection rapide conservée :', err); engineState = 'light'; refreshButtons(); });
+            }
         }
 
         function videoRect() {
@@ -382,11 +498,19 @@
 
         function tick() {
             if (closed || capturing || !video.videoWidth) return;
-            const k = DETECT_SIDE / Math.max(video.videoWidth, video.videoHeight);
+            const k = (cv ? CV_DETECT_SIDE : DETECT_SIDE) / Math.max(video.videoWidth, video.videoHeight);
             const w = Math.round(video.videoWidth * k), h = Math.round(video.videoHeight * k);
             if (detectCanvas.width !== w || detectCanvas.height !== h) { detectCanvas.width = w; detectCanvas.height = h; }
             detectCtx.drawImage(video, 0, 0, w, h);
-            const quad = detectQuad(toGray(detectCtx.getImageData(0, 0, w, h).data, w, h), w, h);
+            const rgba = detectCtx.getImageData(0, 0, w, h).data;
+            let quad = null;
+            if (cv) {
+                try { quad = detectQuadCV(cv, rgba, w, h); }
+                catch (err) { console.error('OpenCV:', err); cv = null; engineState = 'light'; refreshButtons(); }
+            }
+            if (!cv) quad = detectQuad(toGray(rgba, w, h), w, h);
+            if (quad && lastQuad && lastQuad.w !== w) lastQuad = null; // changement de moteur : autre échelle
+            if (quad) quad.w = w;
 
             if (!quad) { lostFrames++; stable = 0; lastQuad = null; } else { lostFrames = 0; }
             if (quad && lastQuad && moved(quad, lastQuad, w) < MOVE_TOLERANCE) stable++; else if (quad) stable = 0;
@@ -460,5 +584,5 @@
         return { close };
     }
 
-    root.CoordinationDocScan = { supported, open, detectQuad, homography, applyH, warpPixels, outputSize, toGray, DETECT_SIDE };
+    root.CoordinationDocScan = { supported, open, detectQuad, detectQuadCV, loadOpenCV, whenReady, orderCorners, validQuad, homography, applyH, warpPixels, outputSize, toGray, DETECT_SIDE };
 })(typeof window !== 'undefined' ? window : globalThis);

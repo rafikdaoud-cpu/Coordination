@@ -1,4 +1,4 @@
-# Reprise technique — Coordination 1.4.0
+# Reprise technique — Coordination 1.5.0
 
 ## Demande et périmètre
 
@@ -113,6 +113,21 @@ de démonstration.
 Il n'y a pas eu d'essai intégré sur le Nextcloud du VPS, de test Safari/iOS, ni de
 charge multiutilisateur. La plage déclarée Nextcloud 25–36 provient de l'archive
 et n'est pas une certification de cette matrice.
+
+## Version 1.5.0 : détection OpenCV (option B)
+
+`js/vendor/opencv.js` (OpenCV.js 4.10, `@techstark/opencv-js`) est chargé par
+`loadOpenCV()` au premier scan (balise script, `define` AMD masqué le temps du chargement).
+**Piège** : le module expose un `then` qui se résout sur lui-même ; ne jamais faire
+`await cv` ni `resolve(cv)` (boucle infinie) : `whenReady()` attend `onRuntimeInitialized`
+et renvoie `{ cv }`. `detectQuadCV` : gris, flou 5×5, Canny (50/150 puis 15/45),
+dilatation, `findContours`, `approxPolyDP` 2 %, plus grand quadrilatère convexe validé par
+`validQuad`, coins ordonnés par `orderCorners`, image d'analyse de 480 px. En cas
+d'exception OpenCV, retour automatique à la détection rapide.
+CSP : `PageController` appelle `allowEvalScript(true)` (embind utilise `new Function`) et
+`allowEvalWasm(true)` si ces méthodes existent ; sinon OpenCV échoue et l'option A reste
+active. C'est un assouplissement de sécurité limité à la page Coordination : ne pas y
+réintroduire de rendu HTML non échappé. Sur Chromium de test, OpenCV est prêt en ≈ 3 s.
 
 ## Version 1.4.0 : scanner en direct (option A)
 

@@ -1,5 +1,19 @@
 # Changements
 
+## 1.5.0 — 2026-11-04
+
+### Scanner : détection OpenCV (option B)
+
+- OpenCV.js 4.10 (`js/vendor/opencv.js`, 10,4 Mo, Apache-2.0) chargé **à la demande**
+  au premier scan, puis gardé en cache par le navigateur.
+- Détection par contours (Canny, deux sensibilités) : trouve une feuille blanche sur
+  une table claire, cas où la détection rapide échoue.
+- La détection rapide (option A) fonctionne pendant le chargement et sert de repli si
+  OpenCV ne peut pas se charger ; le moteur actif est indiqué sous le titre.
+- La page Coordination autorise `unsafe-eval` et la compilation WASM (requis par
+  OpenCV.js), uniquement pour elle.
+
+
 ## 1.4.0 — 2026-11-04
 
 ### Scanner en direct avec détection automatique (option A)

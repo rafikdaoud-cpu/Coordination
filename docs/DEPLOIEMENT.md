@@ -1,4 +1,4 @@
-# Installation / mise à jour de Coordination 1.4.0
+# Installation / mise à jour de Coordination 1.5.0
 
 Ce document décrit une opération à réaliser après sauvegarde et recette. La
 préparation du paquet n'a exécuté aucune commande sur le VPS. Les exemples utilisent
@@ -145,7 +145,14 @@ Utiliser des dossiers fictifs et trois comptes distincts.
    redressée ; retourner pour le verso ; « Terminer », « Envoyer le PDF », valider la
    pièce ; transmettre. Refuser la caméra une fois : l'appareil photo natif doit prendre
    le relais. Tester sur fond clair, sous éclairage faible et avec une carte plastifiée
-   pour décider s'il faut passer à l'option B. Vérifier l'autorisation caméra, la
+   pour comparer : sous le titre de l'écran caméra, « Détection OpenCV » doit apparaître
+   quelques secondes après l'ouverture (premier scan : ≈ 10 Mo à télécharger en 4G).
+   S'il reste « Détection rapide », ouvrir la console du navigateur : un blocage CSP
+   signifie que l'instance n'accepte pas `allowEvalScript`.
+
+Le fichier `js/vendor/opencv.js` (10,4 Mo) est un fichier statique : la compression
+gzip/brotli du serveur web (nginx `gzip_types application/javascript`) réduit nettement
+le premier téléchargement. Vérifier l'autorisation caméra, la
    rotation des photos, la lisibilité du PDF et la durée d'envoi en 4G. Essayer aussi
    « Galerie ou PDF » avec un PDF produit par l'application scanner du téléphone.
 9. BO : « Voir » ouvre le PDF dans un nouvel onglet, « Télécharger » l'enregistre.

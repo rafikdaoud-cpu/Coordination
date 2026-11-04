@@ -8,7 +8,8 @@ from playwright.sync_api import sync_playwright
 root=Path(__file__).resolve().parents[1]
 out=Path(sys.argv[1] if len(sys.argv)>1 else '/tmp/coordination-previews');out.mkdir(parents=True,exist_ok=True)
 def camera_video(path,w=640,h=480):
- """Fausse caméra (Y4M) : feuille claire inclinée avec lignes de texte sur une table sombre."""
+ """Fausse caméra (Y4M) : feuille blanche inclinée avec lignes de texte sur une table CLAIRE.
+ Le détecteur rapide (option A) n'y voit rien : la prise automatique prouve qu'OpenCV (option B) fonctionne."""
  q=[(170,70),(470,95),(455,420),(150,400)]
  def inside(x,y):
   s=0
@@ -20,7 +21,7 @@ def camera_video(path,w=640,h=480):
   return True
  Y=bytearray(w*h)
  for y in range(h):
-  for x in range(w):Y[y*w+x]=(60 if (y%14<3 and 40<(x*7+y)%200<180) else 225) if inside(x,y) else 45+(x+y)//40
+  for x in range(w):Y[y*w+x]=(60 if (y%14<3 and 40<(x*7+y)%200<180) else 240) if inside(x,y) else 180+(x+y)//80
  with open(path,'wb') as f:
   f.write(b'YUV4MPEG2 W%d H%d F10:1 Ip A1:1 C420jpeg\n'%(w,h))
   for _ in range(3):f.write(b'FRAME\n'+bytes(Y)+bytes([128])*(w*h//2))
@@ -34,7 +35,10 @@ with sync_playwright() as p:
    page.on('pageerror',lambda e:errors.append(str(e)))
    page.on('dialog',lambda d:d.accept('Pièce illisible') if d.type=='prompt' else d.accept())
    # Origine HTTPS simulée : la caméra n'est accessible qu'en contexte sécurisé, comme sur Nextcloud.
-   page.route('https://coordination.test/**',lambda r:r.fulfill(content_type='text/html',body='<!doctype html><html lang="fr"><meta name="viewport" content="width=device-width,initial-scale=1"><body style="margin:0"><div id="coord-app-root" class="coord-app"></div></body></html>'))
+   # CSP proche de Nextcloud avec les autorisations demandées par PageController (eval pour OpenCV.js).
+   csp="default-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; media-src 'self' blob:"
+   page.route('https://coordination.test/js/vendor/opencv.js',lambda r:r.fulfill(path=str(root/'js/vendor/opencv.js'),content_type='application/javascript'))
+   page.route('https://coordination.test/',lambda r:r.fulfill(content_type='text/html',headers={'Content-Security-Policy':csp},body='<!doctype html><html lang="fr"><meta name="viewport" content="width=device-width,initial-scale=1"><body style="margin:0"><div id="coord-app-root" class="coord-app"></div></body></html>'))
    page.goto('https://coordination.test/')
    page.add_style_tag(content=(root/'css/app.css').read_text())
    page.evaluate('''role=>{
@@ -58,7 +62,7 @@ with sync_playwright() as p:
      return{ok:true,status:200,text:async()=>JSON.stringify(data)};
     };
    }''',role)
-   page.add_script_tag(content=(root/'js/communes.js').read_text());page.add_script_tag(content=(root/'js/scanpdf.js').read_text());page.add_script_tag(content=(root/'js/docscan.js').read_text());page.add_script_tag(content=(root/'js/app.js').read_text())
+   page.add_script_tag(content=(root/'js/communes.js').read_text());page.add_script_tag(content=(root/'js/scanpdf.js').read_text());page.add_script_tag(content="window.CoordinationDocScanConfig={opencvUrl:'/js/vendor/opencv.js'}");page.add_script_tag(content=(root/'js/docscan.js').read_text());page.add_script_tag(content=(root/'js/app.js').read_text())
    page.locator('.co-table tbody tr').first.wait_for()
    assert not page.evaluate('window.xss') and page.locator('#coord-app-root img').count()==0,'coordinator display name injected HTML'
    assert page.locator('.co-table tbody tr').count()==15
@@ -93,7 +97,14 @@ with sync_playwright() as p:
     assert page.locator('#btn-action-collected').is_disabled()
     # Scanner en direct : la fausse caméra montre une feuille inclinée, la photo doit partir seule.
     page.locator('#piece-1 .btn-live-scan').click();page.locator('.co-docscan').wait_for()
-    page.wait_for_function("document.querySelector('.co-docscan-count')?.textContent.includes('1 page')",timeout=15000)
+    # Auto coupé pendant le chargement d'OpenCV, puis réactivé : la prise doit venir du moteur OpenCV.
+    page.locator('.co-docscan-bottom .co-docscan-chip').click()
+    t0=page.evaluate('performance.now()')
+    page.wait_for_function("document.querySelector('.co-docscan-engine')?.textContent==='Détection OpenCV'",timeout=60000)
+    print(f'   OpenCV prêt en {(page.evaluate("performance.now()")-t0)/1000:.1f} s')
+    assert page.locator('.co-docscan-count').inner_text()=='','manual mode must not capture'
+    page.locator('.co-docscan-bottom .co-docscan-chip').click()
+    page.wait_for_function("document.querySelector('.co-docscan-count')?.textContent.includes('1 page')",timeout=30000)
     assert page.locator('.co-docscan-shutter').evaluate('e=>{const r=e.getBoundingClientRect();return r.width>=64&&r.bottom<=innerHeight}'),'shutter not reachable'
     page.screenshot(path=str(out/f'{role}-{width}-live.png'),full_page=False)
     page.locator('.co-docscan-done').click();page.wait_for_function("!document.querySelector('.co-docscan') && document.querySelectorAll('#piece-1 .co-scan-thumbs img').length===1")

@@ -3,6 +3,7 @@
 namespace OCA\Coordination\Controller;
 
 use OCP\AppFramework\Controller;
+use OCP\AppFramework\Http\ContentSecurityPolicy;
 use OCP\AppFramework\Http\FeaturePolicy;
 use OCP\AppFramework\Http\TemplateResponse;
 use OCP\IRequest;
@@ -29,6 +30,13 @@ class PageController extends Controller {
         $policy = new FeaturePolicy();
         $policy->addAllowedCameraDomain("'self'");
         $response->setFeaturePolicy($policy);
+        // Option B : OpenCV.js (js/vendor) compile son WASM et crée des fonctions (embind,
+        // « new Function ») ; ces deux autorisations ne valent que pour cette page.
+        // Méthodes testées avant appel : sans elles, le scanner retombe sur la détection rapide.
+        $csp = new ContentSecurityPolicy();
+        if (method_exists($csp, 'allowEvalScript')) $csp->allowEvalScript(true);
+        if (method_exists($csp, 'allowEvalWasm')) $csp->allowEvalWasm(true);
+        $response->setContentSecurityPolicy($csp);
         return $response;
     }
 }

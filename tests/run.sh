@@ -15,4 +15,4 @@ node --check js/docscan.js
 "$php_bin" tests/scan.php
 node tests/pdf.js
 node tests/docscan.js
-echo 'Syntaxe PHP/JavaScript et 119 contrôles automatisés réussis.'
+echo 'Syntaxe PHP/JavaScript et 125 contrôles automatisés réussis.'

@@ -1,4 +1,4 @@
-# Coordination — Nextcloud — 1.4.0
+# Coordination — Nextcloud — 1.5.0
 
 Gestion des dossiers clients de CSM Taksit : attribution aux coordinateurs,
 appel et rendez-vous, collecte physique des pièces, puis contrôle Back-Office.
@@ -33,7 +33,9 @@ La fiche guide le coordinateur, sur smartphone d'abord, dans cet ordre imposé p
    La page est recadrée et redressée automatiquement. Retourner la pièce pour le verso,
    puis **Terminer**, vérifier les miniatures et **✅ Envoyer le PDF** (10 pages maximum).
    Le déclencheur rond permet une prise manuelle ; « Auto » et « N&B » se règlent en haut
-   et en bas de l'écran. Si la caméra est refusée, l'appareil photo du téléphone prend le relais. Les photos sont
+   et en bas de l'écran. Si la caméra est refusée, l'appareil photo du téléphone prend le relais.
+   La détection utilise OpenCV (≈ 10 Mo téléchargés au premier scan, puis en cache) ; en
+   attendant, une détection rapide intégrée fonctionne déjà (feuille sur fond sombre). Les photos sont
    réduites et assemblées en PDF A4 sur le téléphone (environ 250 à 500 Ko par page).
    **🖼️ Galerie ou PDF** accepte des photos existantes ou un PDF d'une application de scan.
 3. **② Pièces — valider** : la case « Validée par le coordinateur » ne s'active

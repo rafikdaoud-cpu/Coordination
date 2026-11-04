@@ -762,3 +762,4 @@ html.co-docscan-open, html.co-docscan-open body { overflow: hidden !important; }
 .co-docscan-error { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; text-align: center; background: #0f172a; font-size: 15px; }
 .co-docscan-error[hidden] { display: none; }
 .co-docscan-fallback { background: #0f766e; border-color: #0f766e; font-weight: 650; }
+.co-docscan-engine { display: block; font-size: 12px; font-weight: 400; color: #94a3b8; }
