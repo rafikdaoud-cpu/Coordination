@@ -1,5 +1,19 @@
 # Changements
 
+## 1.8.0 — 2026-11-04
+
+### Correctif : OpenCV bloqué par la sécurité de Nextcloud
+
+- Sur Nextcloud réel, la CSP des pages refuse `unsafe-eval` malgré `allowEvalScript` :
+  le scanner restait en « Détection rapide · OpenCV bloqué par la sécurité du serveur ».
+- OpenCV.js s'exécute désormais dans un Web Worker (`js/docscan-worker.js`), fichier
+  statique hors CSP de page. La page n'autorise plus ni eval ni WASM ; seulement
+  `worker-src 'self'`. La détection ne bloque plus l'affichage de la caméra.
+- Messages d'échec précis : worker refusé (CSP worker-src), CSP posée par le serveur web
+  sur les fichiers .js, fichier introuvable (HTTP 404), délai.
+- Test `tests/browser-opencv.py` avec la CSP stricte des pages Nextcloud (sans unsafe-eval).
+
+
 ## 1.7.0 — 2026-11-04
 
 ### Application Android

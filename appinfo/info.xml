@@ -12,7 +12,7 @@
 - Contrôle de conformité et validation finale par le Back-Office
 - Suppression réservée aux responsables et administrateurs
     ]]></description>
-    <version>1.7.0</version>
+    <version>1.8.0</version>
     <namespace>Coordination</namespace>
     <licence>agpl</licence>
     <author>CSM Taksit / Antigravity</author>

@@ -30,12 +30,10 @@ class PageController extends Controller {
         $policy = new FeaturePolicy();
         $policy->addAllowedCameraDomain("'self'");
         $response->setFeaturePolicy($policy);
-        // Option B : OpenCV.js (js/vendor) compile son WASM et crée des fonctions (embind,
-        // « new Function ») ; ces deux autorisations ne valent que pour cette page.
-        // Méthodes testées avant appel : sans elles, le scanner retombe sur la détection rapide.
+        // OpenCV.js tourne dans un Web Worker (js/docscan-worker.js) : la page n'a besoin ni
+        // d'eval ni de WASM, seulement d'autoriser ce worker venant du même serveur.
         $csp = new ContentSecurityPolicy();
-        if (method_exists($csp, 'allowEvalScript')) $csp->allowEvalScript(true);
-        if (method_exists($csp, 'allowEvalWasm')) $csp->allowEvalWasm(true);
+        if (method_exists($csp, 'addAllowedWorkerSrcDomain')) $csp->addAllowedWorkerSrcDomain("'self'");
         $response->setContentSecurityPolicy($csp);
         return $response;
     }
