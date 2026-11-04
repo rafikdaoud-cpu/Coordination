@@ -3,8 +3,15 @@ namespace OCA\Coordination\Service;
 
 /** Stateless rules are shared by endpoints and covered independently. */
 class Workflow {
-    /** Étapes où le coordinateur travaille encore sur les pièces et le RDV. */
-    public const COORDINATOR_STAGE = ['assigned','appointment_set','rejected'];
+    /**
+     * Parcours coordinateur : 1. rendez-vous, 2. scan de chaque pièce, 3. validation de
+     * la pièce scannée, 4. transmission au BO. Le RDV se fixe (ou se refixe après rejet)
+     * depuis ces statuts ; il fait passer le dossier en appointment_set.
+     */
+    public const APPOINTMENT_STAGE = ['assigned','appointment_set','rejected'];
+    /** Scans et validation des pièces : uniquement une fois le RDV fixé. */
+    public const COORDINATOR_STAGE = ['appointment_set'];
+    public const STAGE_ERROR = 'Fixez d’abord le rendez-vous : les pièces se scannent puis se valident une fois le RDV enregistré.';
     /** Statuts où l'attribution peut encore changer ; après collecte elle est figée. */
     public const REASSIGNABLE = ['new','assigned','appointment_set','rejected'];
 
@@ -14,6 +21,7 @@ class Workflow {
     public static function checklistError(array $roles, string $uid, ?string $assigned, string $status, string $side): ?string {
         if ($side === 'coordinator') {
             if (!self::canCoordinate($roles,$uid,$assigned)) return 'Action réservée au coordinateur affecté ou au responsable.';
+            if (in_array($status,['assigned','rejected'],true)) return self::STAGE_ERROR;
             if (!in_array($status,self::COORDINATOR_STAGE,true)) return 'Les pièces du coordinateur ne sont plus modifiables à cette étape.';
         } elseif ($side === 'backoffice') {
             if (!$roles['back']) return 'Le contrôle de conformité est réservé au Back-Office.';
@@ -21,7 +29,7 @@ class Workflow {
         } else return 'Type de contrôle invalide.';
         return null;
     }
-    public static function transitionError(array $roles, string $uid, ?string $assigned, string $old, string $new, array $pieces, ?string $date, ?string $time, string $note, bool $scanRequired = false): ?string {
+    public static function transitionError(array $roles, string $uid, ?string $assigned, string $old, string $new, array $pieces, ?string $date, ?string $time, string $note): ?string {
         if ($new === 'collected') {
             if (!self::canCoordinate($roles,$uid,$assigned)) return 'Collecte réservée au coordinateur affecté ou au responsable.';
             if ($old === $new) return null;
@@ -36,10 +44,14 @@ class Workflow {
         } else return 'Transition de statut non autorisée.';
         if (!$pieces) return 'La checklist est absente : contactez le responsable.';
         foreach ($pieces as $p) if (!empty($p['is_mandatory']) && empty($p[$field])) return 'Toutes les pièces obligatoires doivent être vérifiées avant cette étape.';
-        if ($new === 'collected' && $scanRequired) {
+        if ($new === 'collected') {
             foreach ($pieces as $p) if (!empty($p['is_mandatory']) && empty($p['scan_count'])) return 'Chaque pièce obligatoire doit être scannée en PDF avant la transmission au Back-Office.';
         }
         return null;
+    }
+    /** Une pièce ne se valide côté coordinateur qu'après son scan. */
+    public static function pieceCheckError(string $side, bool $checked, int $scanCount): ?string {
+        return $side === 'coordinator' && $checked && $scanCount < 1 ? 'Scannez d’abord cette pièce en PDF, puis validez-la.' : null;
     }
     public static function validAppointment(string $date, string $time): bool {
         $d = \DateTimeImmutable::createFromFormat('!Y-m-d H:i',$date.' '.$time);
@@ -52,6 +64,7 @@ class Workflow {
     }
     public static function scanUploadError(array $roles, string $uid, ?string $assigned, string $status): ?string {
         if (!self::canCoordinate($roles,$uid,$assigned)) return 'Scan réservé au coordinateur affecté ou au responsable.';
+        if (in_array($status,['assigned','rejected'],true)) return self::STAGE_ERROR;
         if (!in_array($status,self::COORDINATOR_STAGE,true)) return 'Les scans ne sont plus modifiables après la transmission au Back-Office.';
         return null;
     }

@@ -46,11 +46,11 @@ namespace {
   public \PDO $pdo;
   public function __construct(){$this->pdo=new \PDO('sqlite::memory:');$this->pdo->setAttribute(\PDO::ATTR_ERRMODE,\PDO::ERRMODE_EXCEPTION);$this->pdo->exec(
    'CREATE TABLE coord_dossiers(id INTEGER PRIMARY KEY,case_number TEXT,status TEXT,assigned_coordinator TEXT,revision INTEGER DEFAULT 0);
-    CREATE TABLE coord_checklists(id INTEGER PRIMARY KEY,dossier_id INTEGER,document_code TEXT,document_label_fr TEXT);
+    CREATE TABLE coord_checklists(id INTEGER PRIMARY KEY,dossier_id INTEGER,document_code TEXT,document_label_fr TEXT,coordinator_checked INTEGER DEFAULT 0,coordinator_checked_at INTEGER);
     CREATE TABLE coord_histories(dossier_id INTEGER,user_id TEXT,action TEXT,details TEXT);
     CREATE TABLE coord_scans(id INTEGER PRIMARY KEY AUTOINCREMENT,dossier_id INTEGER,checklist_id INTEGER,file_name TEXT,original_name TEXT,size INTEGER,pages INTEGER,uploaded_by TEXT,uploaded_at INTEGER);
     INSERT INTO coord_dossiers VALUES(1,"DOS/1 é","appointment_set","coord",0),(2,"DOS-2","assigned","other",0);
-    INSERT INTO coord_checklists VALUES(10,1,"cni","CNI"),(11,1,"res","Résidence"),(20,2,"cni","CNI");');}
+    INSERT INTO coord_checklists VALUES(10,1,"cni","CNI",0,NULL),(11,1,"res","Résidence",0,NULL),(20,2,"cni","CNI",0,NULL);');}
   public function getQueryBuilder(){return new SqlQuery($this);}
   public function beginTransaction(){$this->pdo->beginTransaction();} public function commit(){$this->pdo->commit();} public function rollBack(){$this->pdo->rollBack();}
   public function count($sql){return (int)$this->pdo->query($sql)->fetchColumn();}
@@ -104,7 +104,12 @@ namespace {
   $session->uid='coord';$db->pdo->exec('INSERT INTO coord_scans(dossier_id,checklist_id,file_name,size,pages,uploaded_by,uploaded_at) VALUES '.implode(',',array_fill(0,9,"(1,10,'x.pdf',1,1,'coord',0)")));
   upload($pdf);$r=$ctrl->upload(1,10);check($r->status===409&&$files()===1,'per-piece limit enforced without leaving an orphan file');
   $db->pdo->exec("DELETE FROM coord_scans WHERE file_name='x.pdf'");
+  $db->pdo->exec('UPDATE coord_checklists SET coordinator_checked=1 WHERE id=10');
   $r=$ctrl->destroy(1,$scanId);check($r->data['success']&&$files()===0&&$db->count('SELECT count(*) FROM coord_scans')===0,'author deletes scan: row and file removed');
+  check($db->count('SELECT coordinator_checked FROM coord_checklists WHERE id=10')===0,'deleting the last scan of a validated piece puts it back to verify');
+  upload($pdf);check($ctrl->upload(2,20)->status===404,'coordinator cannot scan a dossier assigned to someone else');
+  $db->pdo->exec("UPDATE coord_dossiers SET status='assigned' WHERE id=1");upload($pdf);$r=$ctrl->upload(1,10);check($r->status===403&&str_contains($r->data['error'],'rendez-vous'),'no scan before the appointment');
+  $db->pdo->exec("UPDATE coord_dossiers SET status='appointment_set' WHERE id=1");
   upload($pdf);$scanId=$ctrl->upload(1,11)->data['scan']['id'];
   $db->pdo->exec("UPDATE coord_dossiers SET status='collected'");
   upload($pdf);check($ctrl->upload(1,11)->status===403,'no new scan after transmission to back-office');

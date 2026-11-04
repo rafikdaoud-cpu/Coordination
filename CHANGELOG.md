@@ -1,5 +1,27 @@
 # Changements
 
+## 1.3.0 — 2026-11-04
+
+### Parcours coordinateur imposé : RDV → scan → validation
+
+- Les pièces ne se scannent et ne se valident qu'une fois le RDV enregistré
+  (statut « RDV fixé ») ; après un rejet, un nouveau RDV est exigé d'abord.
+- La validation coordinateur d'une pièce exige au moins un scan de cette pièce ;
+  supprimer le dernier scan d'une pièce validée la remet « à vérifier ».
+- La transmission au BO exige, pour chaque pièce obligatoire, scan **et** validation.
+  Le scan devient donc systématique : l'option `scan_required` de 1.2.0 est retirée.
+- Contrôles côté serveur (403/409) et interface guidée : onglets ① Rendez-vous puis
+  ② Pièces, ouverture de la fiche sur l'étape en cours, bandeau d'étape, bascule
+  automatique vers les pièces après le RDV, case « Valider » active après le scan,
+  bouton « 📤 Transmettre au Back-Office » sur l'onglet Pièces.
+
+### Smartphone
+
+- Messages collés en haut de la fiche (plus d'`alert` lors d'une case refusée),
+  effacement automatique des succès, onglet actif ramené dans la zone visible,
+  défilement conservé lors des mises à jour. Aucune migration de base.
+
+
 ## 1.2.0 — 2026-11-04
 
 ### Nouveau : scan des pièces en PDF

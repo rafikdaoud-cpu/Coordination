@@ -1,4 +1,4 @@
-# Coordination — Nextcloud — 1.2.0
+# Coordination — Nextcloud — 1.3.0
 
 Gestion des dossiers clients de CSM Taksit : attribution aux coordinateurs,
 appel et rendez-vous, collecte physique des pièces, puis contrôle Back-Office.
@@ -19,30 +19,33 @@ Cette version prépare un usage fréquent sur smartphone.
 Une connexion est nécessaire. Cette version n'enregistre pas les formulaires
 hors ligne et ne les restaure pas après fermeture du navigateur.
 
-## Scan des pièces en PDF
+## Parcours du coordinateur : RDV → scan → validation
 
-Quand le coordinateur confirme la réception d'une pièce, il la scanne depuis la
-fiche, onglet **Pièces** :
+La fiche guide le coordinateur, sur smartphone d'abord, dans cet ordre imposé par le serveur :
 
-1. Cocher « Vérifié par le coordinateur » : l'application propose le scan.
-2. **📷 Scanner** ouvre l'appareil photo arrière. Une photo = une page ;
-   **➕ Page suivante** pour un recto-verso (10 pages maximum). Le « mode document »
-   (noir et blanc contrasté) améliore la lisibilité du texte.
-3. **✅ Envoyer le PDF** : les photos sont réduites et assemblées en PDF A4 sur le
-   téléphone, puis envoyées (environ 250 à 500 Ko par page).
-4. **🖼️ Galerie ou PDF** accepte aussi des photos existantes ou un PDF déjà produit
-   par une application de scan.
+1. **① Rendez-vous** : la fiche d'un dossier attribué s'ouvre sur cet onglet. Saisir
+   date et heure, « Enregistrer le Rendez-vous ». Le dossier passe « RDV fixé » et la
+   fiche bascule sur l'onglet Pièces. Avant le RDV, aucune pièce ne peut être scannée
+   ni validée.
+2. **② Pièces — scanner** : sous chaque pièce, **📷 Scanner** ouvre l'appareil photo
+   arrière. Une photo = une page ; **➕ Page suivante** pour un verso (10 pages maximum),
+   « mode document » noir et blanc possible, puis **✅ Envoyer le PDF**. Les photos sont
+   réduites et assemblées en PDF A4 sur le téléphone (environ 250 à 500 Ko par page).
+   **🖼️ Galerie ou PDF** accepte des photos existantes ou un PDF d'une application de scan.
+3. **② Pièces — valider** : la case « Validée par le coordinateur » ne s'active
+   qu'après l'envoi du scan de la pièce. Supprimer le dernier scan d'une pièce validée
+   la remet « à vérifier ».
+4. **📤 Transmettre au Back-Office** : actif quand toutes les pièces obligatoires sont
+   scannées **et** validées.
+
+Après un rejet BO, le coordinateur refixe un rendez-vous puis reprend les étapes 2 à 4.
 
 Le Back-Office, le responsable et le coordinateur affecté voient les scans sous
 chaque pièce : **👁️ Voir** (nouvel onglet) et **⬇️ Télécharger**. Les commerciaux et
 les autres coordinateurs n'y ont pas accès. Le coordinateur peut supprimer ses scans
-jusqu'à la transmission au BO ; ensuite seul le responsable le peut. Limites : PDF
-réel uniquement (contrôlé sur le serveur), 20 Mo par scan, 10 scans par pièce.
-
-Les fichiers sont stockés dans les données privées de l'application Nextcloud
-(pas dans « Fichiers »). Le scan est facultatif par défaut ; l'administrateur peut
-l'exiger pour chaque pièce obligatoire avant la collecte (`scan_required`, voir le
-guide de déploiement).
+jusqu'à la transmission ; ensuite seul le responsable le peut. Limites : PDF réel
+uniquement (contrôlé sur le serveur), 20 Mo par scan, 10 scans par pièce. Les fichiers
+sont dans les données privées de l'application Nextcloud (pas dans « Fichiers »).
 
 ## Rôles et droits
 
@@ -67,8 +70,9 @@ et remplace les groupes par défaut pour ce rôle. Voir le guide de déploiement
 ## Parcours d'un dossier
 
 1. Le responsable importe un XLSX ou crée le dossier, puis l'attribue.
-2. Le coordinateur vérifie les pièces et enregistre une date et une heure de RDV.
-3. Une fois les pièces obligatoires cochées, il transmet le dossier collecté au BO.
+2. Le coordinateur fixe le rendez-vous (date et heure).
+3. Au RDV, il scanne chaque pièce en PDF puis la valide ; une fois toutes les pièces
+   obligatoires scannées et validées, il transmet le dossier collecté au BO.
 4. Le Back-Office vérifie la conformité, puis valide après les contrôles obligatoires,
    ou rejette avec un motif.
 5. Un dossier rejeté peut être corrigé puis présenté à nouveau. Les anciennes cases

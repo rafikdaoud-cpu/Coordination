@@ -1,4 +1,4 @@
-# Installation / mise à jour de Coordination 1.2.0
+# Installation / mise à jour de Coordination 1.3.0
 
 Ce document décrit une opération à réaliser après sauvegarde et recette. La
 préparation du paquet n'a exécuté aucune commande sur le VPS. Les exemples utilisent
@@ -81,17 +81,9 @@ banques/champs/pièces sont dans la table métier `coord_configs`.
 L'étape d'installation/mise à jour crée les groupes Coordination par défaut
 manquants, même avec un mapping personnalisé, sans y ajouter d'utilisateurs.
 
-### Scan obligatoire (optionnel)
-
-Par défaut, le scan PDF est proposé mais pas exigé. Pour bloquer la transmission au
-Back-Office tant qu'une pièce obligatoire n'a pas au moins un scan :
-
-```bash
-runuser -u csmtak11 -- php occ config:app:set coordination scan_required --value=1
-```
-
-`--value=0` (ou `occ config:app:delete coordination scan_required`) revient au mode facultatif.
-La règle est contrôlée sur le serveur et affichée dans la fiche du coordinateur.
+Depuis 1.3.0, le scan de chaque pièce est systématique (parcours RDV → scan →
+validation) : la clé `scan_required` de 1.2.0 n'est plus lue et peut être supprimée
+(`occ config:app:delete coordination scan_required`).
 
 ## 4. Remplacer les fichiers et appliquer la version
 
@@ -147,8 +139,9 @@ Utiliser des dossiers fictifs et trois comptes distincts.
    Nextcloud, défilement, orientation et actions basses accessibles.
 7. Commercial en lecture seule, utilisateur sans groupe refusé, tentative d'accès
    au dossier d'un autre coordinateur refusée.
-8. Scans : sur le téléphone du coordinateur, cocher une pièce, « 📷 Scanner »,
-   photographier 2 pages, « Envoyer le PDF ». Vérifier l'autorisation caméra, la
+8. Parcours : sur le téléphone du coordinateur, vérifier qu'avant le RDV aucune
+   pièce ne se scanne ni ne se valide ; enregistrer le RDV ; « 📷 Scanner »,
+   photographier 2 pages, « Envoyer le PDF », puis valider la pièce ; transmettre. Vérifier l'autorisation caméra, la
    rotation des photos, la lisibilité du PDF et la durée d'envoi en 4G. Essayer aussi
    « Galerie ou PDF » avec un PDF produit par l'application scanner du téléphone.
 9. BO : « Voir » ouvre le PDF dans un nouvel onglet, « Télécharger » l'enregistre.

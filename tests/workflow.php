@@ -34,6 +34,7 @@ namespace OCA\Coordination\Service {
  /** Double : nombre de scans par pièce, configurable par test. */
  class ScanService {
   public array $counts=[]; public array $removed=[];
+  public function countForPiece($itemId) { return $this->counts[$itemId]??0; }
   public function attach($id,$pieces) { foreach($pieces as &$p) $p['scan_count']=$this->counts[$p['id']]??0; return $pieces; }
   public function deleteRowsForDossier($id) {} public function removeFolder($id) { $this->removed[]=$id; }
  }
@@ -107,7 +108,8 @@ namespace {
  $request->p=['appointment_date'=>'2026-11-03','appointment_time'=>'25:00'];check(!$ctrl->setAppointment(1)->data['success'],'invalid time rejected');
  $request->p=['appointment_date'=>'2026-11-03','appointment_time'=>'10:00'];check($ctrl->setAppointment(1)->data['success'],'coordinateur can set own valid appointment');
  $request->p=['status'=>'collected'];check(!$ctrl->changeStatus(1)->data['success'],'incomplete mandatory pieces block collection');
- $service->pieces[0]['coordinator_checked']=true;check($ctrl->changeStatus(1)->data['success'],'checked mandatory pieces permit collection');
+ $service->pieces[0]['coordinator_checked']=true;$r=$ctrl->changeStatus(1);check($r->status===409&&str_contains($r->data['error'],'scannée'),'validated pieces without PDF scan block collection');
+ $scans->counts[1]=1;check($ctrl->changeStatus(1)->data['success'],'scanned and validated mandatory pieces permit collection');$scans->counts=[];
  check(in_array(['table'=>'coord_checklists','sets'=>['backoffice_checked'=>0,'backoffice_checked_at'=>null]],$db->operations,true),'resubmission clears prior conformity approval before a new back-office decision');
  $session->uid='back';$request->p=['checklist_item_id'=>1,'role'=>'coordinator','checked'=>true];check(!$ctrl->updateChecklist(1)->data['success'],'back-office cannot alter coordinateur check');
  $request->p=['checklist_item_id'=>999,'role'=>'backoffice','checked'=>true];check($ctrl->updateChecklist(1)->status===404,'piece must belong to targeted dossier');
@@ -144,9 +146,14 @@ namespace {
  check($r->status===409&&$mapper->updates===$before,'concurrent back-office decision detected and refused');
  $request->p=['checklist_item_id'=>1,'role'=>'backoffice','checked'=>false];check($ctrl->updateChecklist(1)->status===409,'checklist write refused when dossier changed meanwhile');
  $db->affected=null;
- $session->uid='coord';$dossier->setStatus('appointment_set');$config->v['scan_required']='1';$service->pieces[0]['coordinator_checked']=true;
- $request->p=['status'=>'collected'];$r=$ctrl->changeStatus(1);check($r->status===409&&str_contains($r->data['error'],'scannée'),'scan_required blocks collection without PDF');
- $scans->counts[1]=1;$dossier->setStatus('appointment_set');check($ctrl->changeStatus(1)->data['success'],'scan_required satisfied by one PDF per mandatory piece');
+ // Parcours : RDV -> scan -> validation de la pièce
+ $session->uid='coord';$dossier->setStatus('assigned');$request->p=['checklist_item_id'=>1,'role'=>'coordinator','checked'=>true];
+ $r=$ctrl->updateChecklist(1);check($r->status===403&&str_contains($r->data['error'],'rendez-vous'),'pieces cannot be validated before the appointment');
+ $dossier->setStatus('rejected');check($ctrl->updateChecklist(1)->status===403,'after rejection a new appointment comes first');
+ $dossier->setStatus('appointment_set');$r=$ctrl->updateChecklist(1);check($r->status===409&&str_contains($r->data['error'],'Scannez'),'piece cannot be validated before it is scanned');
+ $scans->counts[1]=1;check($ctrl->updateChecklist(1)->data['success'],'scanned piece can be validated after the appointment');
+ $request->p=['checklist_item_id'=>1,'role'=>'coordinator','checked'=>false];$scans->counts=[];check($ctrl->updateChecklist(1)->data['success'],'a piece can always be unchecked');
+ $dossier->setStatus('rejected');$request->p=['appointment_date'=>'2026-11-05','appointment_time'=>'09:30'];check($ctrl->setAppointment(1)->data['success'],'rejected dossier gets a new appointment');
  $config->v=[];$scans->counts=[];
  $session->uid='manager';$mapper->fail=new \RuntimeException('SQLSTATE[42S02] secret table coord_dossiers');$r=$ctrl->index();
  check($r->status===500&&!str_contains($r->data['error'],'SQLSTATE')&&count($logger->logs)===1,'technical errors are logged, not shown to users');
@@ -156,6 +163,7 @@ namespace {
  check(!$W::canViewScans($roles('sales'),'sales','coord'),'sales cannot view scanned identity documents');
  check($W::canViewScans($roles('back'),'back','coord')&&$W::canViewScans($roles('coord'),'coord','coord')&&!$W::canViewScans($roles('other'),'other','coord'),'back-office and assigned coordinator view scans, other coordinators do not');
  check($W::scanUploadError($roles('coord'),'coord','coord','appointment_set')===null&&$W::scanUploadError($roles('coord'),'coord','coord','collected')!==null,'coordinator scans until the dossier is sent');
+ check($W::scanUploadError($roles('coord'),'coord','coord','assigned')===$W::STAGE_ERROR,'no scan before the appointment is set');
  check($W::scanUploadError($roles('back'),'back','coord','appointment_set')!==null,'back-office cannot add coordinator scans');
  check($W::scanDeleteError($roles('coord'),'coord','coord','assigned','manager')!==null&&$W::scanDeleteError($roles('manager'),'manager','coord','validated','coord')===null,'only author or manager deletes a scan');
  echo "$n checks passed\n";

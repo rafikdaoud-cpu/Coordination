@@ -720,3 +720,16 @@ input[type="time"].co-input::-webkit-calendar-picker-indicator {
  #coord-app-root .co-scan-links{width:100%}
  #coord-app-root .co-scan-links .co-btn{flex:1 1 auto;justify-content:center}
 }
+
+/* --- 1.3.0 : parcours guidé RDV → scan → validation --- */
+#coord-app-root .co-modal-body > .co-feedback{position:sticky;top:0;z-index:3;margin:0 0 10px;box-shadow:0 4px 12px rgba(15,23,42,.12)}
+#coord-app-root .co-step-banner{display:flex;flex-direction:column;gap:6px;padding:12px 14px;margin-bottom:10px;border-radius:12px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;font-size:14px}
+#coord-app-root .co-step-banner span{font-size:13px;color:#334155}
+#coord-app-root .co-step-banner.is-blocked{background:#fffbeb;border-color:#fcd34d;color:#78350f}
+#coord-app-root .co-step-banner .co-btn{align-self:flex-start;min-height:46px;margin-top:4px}
+#coord-app-root .co-piece-checks label.is-waiting{border-style:dashed;color:#64748b}
+#coord-app-root .co-piece-card.is-validated .co-piece-heading strong::after{content:" ✅"}
+#coord-app-root .co-piece-card.is-scanned:not(.is-validated) .co-piece-heading strong::after{content:" 📎"}
+@media(max-width:768px){
+ #coord-app-root .co-step-banner .co-btn{align-self:stretch}
+}

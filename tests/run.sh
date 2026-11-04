@@ -13,4 +13,4 @@ node --check js/scanpdf.js
 "$php_bin" tests/create.php
 "$php_bin" tests/scan.php
 node tests/pdf.js
-echo 'Syntaxe PHP/JavaScript et 99 contrôles automatisés réussis.'
+echo 'Syntaxe PHP/JavaScript et 106 contrôles automatisés réussis.'

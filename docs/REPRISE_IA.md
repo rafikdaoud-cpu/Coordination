@@ -1,4 +1,4 @@
-# Reprise technique — Coordination 1.2.0
+# Reprise technique — Coordination 1.3.0
 
 ## Demande et périmètre
 
@@ -114,6 +114,16 @@ Il n'y a pas eu d'essai intégré sur le Nextcloud du VPS, de test Safari/iOS, n
 charge multiutilisateur. La plage déclarée Nextcloud 25–36 provient de l'archive
 et n'est pas une certification de cette matrice.
 
+## Version 1.3.0 : parcours imposé RDV → scan → validation
+
+`Workflow::APPOINTMENT_STAGE` (assigned, appointment_set, rejected) : statuts depuis
+lesquels le RDV se fixe. `Workflow::COORDINATOR_STAGE` (appointment_set seul) : scans
+et cases coordinateur. `Workflow::pieceCheckError` : cocher côté coordinateur exige un
+scan de la pièce. `transitionError` vers `collected` exige scan et validation de
+chaque pièce obligatoire. La suppression du dernier scan d'une pièce validée la décoche
+dans la même transaction. Interface : `defaultModalTab`, `renderNextStep`, boutons
+`data-goto-tab`. L'option `scan_required` (1.2.0) a été retirée.
+
 ## Version 1.2.0 : scans PDF et corrections
 
 Dépôt de destination identifié : `rafikdaoud-cpu/Coordination` (GitHub).
@@ -128,8 +138,8 @@ Dépôt de destination identifié : `rafikdaoud-cpu/Coordination` (GitHub).
 | `lib/Migration/Version1200Date20261104120000.php` | Colonne `revision`, table `coord_scans` (additive) |
 
 Droits des scans (`Workflow`) : consultation par admin, responsable, BO et
-coordinateur affecté ; dépôt par le coordinateur affecté ou le responsable aux
-étapes `assigned`, `appointment_set`, `rejected` ; suppression par l'auteur à ces
+coordinateur affecté ; dépôt par le coordinateur affecté ou le responsable au
+statut `appointment_set` (depuis 1.3.0) ; suppression par l'auteur à ces
 étapes ou par le responsable à tout moment. Les commerciaux, qui lisent les fiches,
 ne voient pas les scans : `show()` n'ajoute `scans` qu'avec `can_view_scans`.
 

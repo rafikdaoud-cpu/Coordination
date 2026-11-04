@@ -154,10 +154,17 @@ class ScanApiController extends Controller {
             if (!$scan) return $this->error('Scan introuvable', 404);
             $roles = $this->access->roles(); $uid = $this->uid();
             if ($error = Workflow::scanDeleteError($roles, $uid, $dossier->getAssignedCoordinator(), (string)$dossier->getStatus(), (string)$scan['uploaded_by'])) return $this->error($error, 403);
-            $this->transaction(function () use ($id,$scanId,$uid,$roles) {
+            $status = (string)$dossier->getStatus();
+            $itemId = (int)$scan['checklist_id'];
+            $this->transaction(function () use ($id,$scanId,$uid,$roles,$status,$itemId) {
                 $this->lock->claim($id, $roles['rcoord'] ? null : Workflow::COORDINATOR_STAGE);
                 $this->scans->deleteRow($scanId);
-                $this->dossierService->addHistory($id, $uid, 'scan_delete', 'Scan PDF supprimé (n° ' . $scanId . ')');
+                $detail = 'Scan PDF supprimé (n° ' . $scanId . ')';
+                // Une pièce validée sans scan n'est plus valide : elle redevient « à vérifier ».
+                if (in_array($status, Workflow::COORDINATOR_STAGE, true) && $this->scans->countForPiece($itemId) === 0 && $this->scans->uncheckCoordinator($id, $itemId)) {
+                    $detail .= ' · pièce ' . $itemId . ' remise « à vérifier »';
+                }
+                $this->dossierService->addHistory($id, $uid, 'scan_delete', $detail);
             });
             try { $this->scans->removeFile($id, (string)$scan['file_name']); }
             catch (Throwable $e) { $this->logger->warning('Coordination : fichier de scan non effacé', ['app'=>'coordination','exception'=>$e]); }

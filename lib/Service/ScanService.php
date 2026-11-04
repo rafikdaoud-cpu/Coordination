@@ -125,6 +125,18 @@ class ScanService {
         $q->delete('coord_scans')->where($q->expr()->eq('id', $q->createNamedParameter($scanId)))->executeStatement();
     }
 
+    /** Décoche la validation coordinateur d'une pièce ; true si elle était cochée. */
+    public function uncheckCoordinator(int $dossierId, int $itemId): bool {
+        $q = $this->db->getQueryBuilder();
+        $q->update('coord_checklists')
+          ->set('coordinator_checked', $q->createNamedParameter(0))
+          ->set('coordinator_checked_at', $q->createNamedParameter(null))
+          ->where($q->expr()->eq('id', $q->createNamedParameter($itemId)))
+          ->andWhere($q->expr()->eq('dossier_id', $q->createNamedParameter($dossierId)))
+          ->andWhere($q->expr()->eq('coordinator_checked', $q->createNamedParameter(1)));
+        return (int)$q->executeStatement() > 0;
+    }
+
     public function deleteRowsForDossier(int $dossierId): void {
         $q = $this->db->getQueryBuilder();
         $q->delete('coord_scans')->where($q->expr()->eq('dossier_id', $q->createNamedParameter($dossierId)))->executeStatement();

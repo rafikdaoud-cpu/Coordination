@@ -490,7 +490,7 @@ class DossierApiController extends Controller {
             if ($dossier instanceof JSONResponse) return $dossier;
 
             if (!Workflow::canCoordinate($this->userRoles(),$this->getCurrentUserId(),$dossier->getAssignedCoordinator())) return $this->error('Action réservée au coordinateur affecté',403);
-            if (!in_array($dossier->getStatus(),Workflow::COORDINATOR_STAGE,true)) return $this->error('Rendez-vous non modifiable à cette étape',409);
+            if (!in_array($dossier->getStatus(),Workflow::APPOINTMENT_STAGE,true)) return $this->error('Rendez-vous non modifiable à cette étape',409);
             $date = $body['appointment_date'] ?? '';
             $time = $body['appointment_time'] ?? '';
             $notes = $body['appointment_notes'] ?? '';
@@ -502,7 +502,7 @@ class DossierApiController extends Controller {
             $dossier->setAppointmentNotes($notes);
             $dossier->setStatus(DossierService::STATUS_APPOINTMENT_SET);
             $dossier->setUpdatedAt(time());
-            $this->persist($dossier,'appointment',"RDV fixé le $date à $time. Consignes: $notes",Workflow::COORDINATOR_STAGE);
+            $this->persist($dossier,'appointment',"RDV fixé le $date à $time. Consignes: $notes",Workflow::APPOINTMENT_STAGE);
 
             return new JSONResponse(['success' => true, 'data' => $dossier]);
         } catch (Throwable $e) {
@@ -536,6 +536,7 @@ class DossierApiController extends Controller {
             if ($error) return $this->error($error,403);
             $pieces = $this->dossierService->getDossierDetails($id)['checklist'];
             if (!array_filter($pieces,fn($p) => (int)$p['id'] === $itemId)) return $this->error('Pièce introuvable dans ce dossier',404);
+            if ($error = Workflow::pieceCheckError($role,(bool)$checked,$this->scans->countForPiece($itemId))) return $this->error($error,409);
             $now = time();
             $qb = $this->db->getQueryBuilder();
             $qb->update('coord_checklists');
@@ -589,7 +590,7 @@ class DossierApiController extends Controller {
 
             $oldStatus = (string)$dossier->getStatus();
             $roles = $this->userRoles(); $uid = $this->getCurrentUserId();
-            $check = fn(array $pieces) => Workflow::transitionError($roles,$uid,$dossier->getAssignedCoordinator(),$oldStatus,$newStatus,$pieces,$dossier->getAppointmentDate(),$dossier->getAppointmentTime(),$note,$this->access->scanRequired());
+            $check = fn(array $pieces) => Workflow::transitionError($roles,$uid,$dossier->getAssignedCoordinator(),$oldStatus,$newStatus,$pieces,$dossier->getAppointmentDate(),$dossier->getAppointmentTime(),$note);
             $error = $check($this->piecesWithScans($id));
             if ($error) return $this->error($error,409);
             if ($oldStatus === $newStatus) return new JSONResponse(['success'=>true,'data'=>$dossier]);

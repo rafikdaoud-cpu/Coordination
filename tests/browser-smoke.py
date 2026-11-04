@@ -57,29 +57,45 @@ with sync_playwright() as p:
    if role=='manager':page.locator('[data-modal-tab=checklist]').click()
    assert page.locator('.co-piece-card').count()==2
    if role=='coord':
+    # Étape 1 : RDV avant tout scan ou validation
     assert page.locator('[data-role=backoffice]').first.is_disabled()
-    page.evaluate('window.fixture.failWrite=true');page.locator('[data-role=coordinator]').first.click()
-    page.wait_for_function("!document.querySelector('[data-role=coordinator]').checked")
-    assert 'interrompue' in page.locator('.co-feedback:visible').last.inner_text()
-    for item in page.locator('[data-role=coordinator]').all():item.check()
-    page.wait_for_function("document.querySelector('.co-checklist-progress').textContent.startsWith('2 / 2')")
-    assert 'Scannez-la' in page.locator('.co-feedback:visible').last.inner_text(),'no scan prompt after checking a piece'
+    assert page.locator('[data-role=coordinator]').first.is_disabled(),'piece can be validated before the appointment'
+    assert page.locator('.scan-photo-input').count()==0,'scan offered before the appointment'
+    assert 'Étape 1' in page.locator('.co-step-banner').inner_text()
+    page.screenshot(path=str(out/f'{role}-{width}-step1.png'),full_page=False)
+    page.locator('.co-step-banner [data-goto-tab=appointment]').click()
+    page.locator('#modal-app-date').fill('2026-11-03');page.locator('#modal-app-time').fill('10:00')
+    page.locator('#btn-save-appointment').click()
+    page.wait_for_function("document.querySelector('.co-tab.active[data-modal-tab=checklist]') && document.querySelector('.co-step-banner')?.textContent.includes('Étape 2')")
+    # Étape 2 : scanner puis valider
+    assert page.locator('#piece-1 [data-role=coordinator]').is_disabled(),'piece can be validated before its scan'
+    assert page.locator('#btn-action-collected').is_disabled()
     page.locator('#piece-1 .scan-photo-input').set_input_files([{'name':'photo1.jpg','mimeType':'image/jpeg','buffer':PHOTO}])
     page.locator('#piece-1 .co-scan-thumbs img').first.wait_for()
     page.locator('#piece-1 .scan-photo-input').set_input_files([{'name':'photo2.jpg','mimeType':'image/jpeg','buffer':PHOTO}])
     page.wait_for_function("document.querySelectorAll('#piece-1 .co-scan-thumbs img').length===2")
     page.locator('#piece-1 .co-scan-session').scroll_into_view_if_needed()
+    assert page.locator('.btn-scan-send').evaluate('e=>{const r=e.getBoundingClientRect();return r.height>=44&&r.right<=innerWidth+2}'),'send button too small or off screen'
     page.screenshot(path=str(out/f'{role}-{width}-scan.png'),full_page=False)
     page.locator('.btn-scan-send').click()
-    page.wait_for_function("document.querySelector('#piece-1 .co-scan-row')")
+    page.wait_for_function("document.querySelector('#piece-1 .co-scan-row') && !document.querySelector('#piece-1 [data-role=coordinator]').disabled")
     up=page.evaluate('window.fixture.uploads[0]')
     assert up['head']=='%PDF-' and up['name'].endswith('_cni.pdf') and up['size']>1000,up
     assert page.locator('#piece-1 .co-scan-row a[download]').get_attribute('href').endswith('/scans/51/file?download=1')
-    assert '✅ Scan PDF enregistré' in page.locator('.co-feedback:visible').last.inner_text()
+    assert 'Cochez' in page.locator('.co-feedback:visible').last.inner_text(),'no validation hint after scan'
+    page.evaluate('window.fixture.failWrite=true');page.locator('#piece-1 [data-role=coordinator]').click()
+    page.wait_for_function("!document.querySelector('#piece-1 [data-role=coordinator]').checked && document.querySelector('.co-feedback:not([hidden])')?.textContent.includes('interrompue')")
+    page.locator('#piece-1 [data-role=coordinator]').check()
+    page.wait_for_function("document.querySelector('.co-checklist-progress').textContent.includes('✅ 1 / 2')")
+    assert page.locator('#btn-action-collected').is_disabled(),'collection allowed with a piece neither scanned nor validated'
+    page.locator('#piece-2 .scan-pick-input').set_input_files([{'name':'residence.pdf','mimeType':'application/pdf','buffer':b'%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n'}])
+    page.wait_for_function("!document.querySelector('#piece-2 [data-role=coordinator]').disabled")
+    assert page.evaluate('window.fixture.uploads[1].name')=='residence.pdf'
+    page.locator('#piece-2 [data-role=coordinator]').check()
+    page.wait_for_function("document.querySelector('.co-checklist-progress').textContent.includes('📎 2 / 2') && document.querySelector('.co-checklist-progress').textContent.includes('✅ 2 / 2')")
     page.locator('.co-modal-body').evaluate('e=>e.scrollTop=0')
     page.screenshot(path=str(out/f'{role}-{width}-checklist.png'),full_page=False)
-    page.locator('#btn-next-step').click();page.locator('#modal-app-date').fill('2026-11-03');page.locator('#modal-app-time').fill('10:00')
-    page.locator('#btn-save-appointment').click();page.locator('#btn-action-collected').wait_for(state='visible');page.locator('#btn-action-collected').click()
+    page.locator('#btn-action-collected').click()
     page.wait_for_function("document.querySelector('.co-modal').textContent.includes('Collecté')")
    elif role=='back':
     assert page.locator('[data-role=coordinator]').first.is_disabled()

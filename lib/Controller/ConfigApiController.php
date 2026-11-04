@@ -67,7 +67,6 @@ class ConfigApiController extends Controller {
             'document_templates' => $this->dossierService->getDocumentTemplates(),
             'custom_fields' => $this->dossierService->getCustomFields(),
             'banks' => $this->dossierService->getBanks(),
-            'scan_required' => $this->access->scanRequired(),
             'scan_max_bytes' => \OCA\Coordination\Service\ScanService::MAX_BYTES,
         ]);
     }

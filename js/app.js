@@ -6,7 +6,7 @@
 (function () {
     'use strict';
 
-    const APP_VERSION = '1.2.0';
+    const APP_VERSION = '1.3.0';
     let initialized = false, dossierRequest = 0;
     let mutationBusy = false;
     let lastModalKey = '';
@@ -43,7 +43,6 @@
         dirty: false,
         modal: null, // 'detail', 'new', 'import', 'settings'
         activeModalTab: 'info', // 'info', 'checklist', 'appointment', 'history'
-        scanRequired: false,
         scanMaxBytes: 20 * 1024 * 1024,
         scanDocMode: false,
     };
@@ -51,7 +50,7 @@
     const statusMap = {
         'new': { label: 'Nouveau', class: 'co-badge-new' },
         'assigned': { label: 'Attribué (À appeler)', class: 'co-badge-assigned' },
-        'appointment_set': { label: 'RDV Fixé (À récupérer sur place)', class: 'co-badge-appointment_set' },
+        'appointment_set': { label: 'RDV fixé (Scanner & valider les pièces)', class: 'co-badge-appointment_set' },
         'collected': { label: 'Collecté (En contrôle BO)', class: 'co-badge-collected' },
         'validated': { label: 'Validé & Conforme', class: 'co-badge-validated' },
         'rejected': { label: 'Rejeté / Incomplet', class: 'co-badge-rejected' },
@@ -109,7 +108,6 @@
             state.documentTemplates = res.document_templates || [];
             state.customFields = res.custom_fields || [];
             state.banks = res.banks || [];
-            state.scanRequired = !!res.scan_required;
             if (res.scan_max_bytes) state.scanMaxBytes = Number(res.scan_max_bytes);
             if (res.current_user) {
                 state.currentUser = res.current_user;
@@ -206,9 +204,21 @@
     function canCoordinate(d) {
         return state.currentUser.is_rcoordinateur || (state.currentUser.is_coordinateur && d.assigned_coordinator === state.currentUser.uid);
     }
+    let feedbackTimer = null;
     function feedback(message, error = true) {
         const slot = document.querySelector('.co-modal .co-feedback') || document.getElementById('co-live-feedback');
-        if (slot) { slot.textContent = message; slot.classList.toggle('is-error',error); slot.hidden = false; }
+        if (!slot) return;
+        slot.textContent = message; slot.classList.toggle('is-error',error); slot.hidden = false;
+        clearTimeout(feedbackTimer);
+        // Sur téléphone le message reste collé en haut de la fiche ; un succès s'efface seul.
+        if (!error) feedbackTimer = setTimeout(() => { if (slot.isConnected && slot.textContent === message) slot.hidden = true; }, 6000);
+    }
+
+    /** Onglet d'ouverture selon l'étape : RDV d'abord, puis pièces (scan + validation). */
+    function defaultModalTab(d) {
+        if (d && canCoordinate(d) && ['assigned','rejected'].includes(d.status)) return 'appointment';
+        if (d && canCoordinate(d) && d.status === 'appointment_set') return 'checklist';
+        return state.currentUser.is_backoffice || state.currentUser.is_coordinateur ? 'checklist' : 'info';
     }
     async function saveStatus(id, status, note) {
         if (mutationBusy) return;
@@ -232,7 +242,7 @@
             state.dirty = false;
             state.currentDossier = res.data;
             state.modal = 'detail';
-            if (!same) state.activeModalTab = state.currentUser.is_coordinateur || state.currentUser.is_backoffice ? 'checklist' : 'info';
+            if (!same) state.activeModalTab = defaultModalTab(res.data.dossier);
             render();
         } else {
             console.error('Detail Error:', res);
@@ -361,6 +371,13 @@
         lastModalKey = modalKey;
         const body = root.querySelector('.co-modal-body');
         if (body && keepScroll !== null) body.scrollTop = keepScroll;
+        // Onglet actif de la fiche toujours visible sur petit écran (barre d'onglets défilante).
+        const activeModalTab = root.querySelector('.co-modal-tabs .co-tab.active');
+        if (activeModalTab) {
+            const bar = activeModalTab.parentElement, a = bar.getBoundingClientRect(), t = activeModalTab.getBoundingClientRect();
+            if (t.left < a.left) bar.scrollLeft += t.left - a.left - 8;
+            else if (t.right > a.right) bar.scrollLeft += t.right - a.right + 8;
+        }
         const activeFilter = root.querySelector('.co-tabs .co-tab.active');
         if (activeFilter) {
             const tabs = activeFilter.parentElement;
@@ -537,8 +554,8 @@
 
                     <div class="co-modal-tabs" aria-label="Rubriques du dossier">
                         <button class="co-tab ${state.activeModalTab === 'info' ? 'active' : ''}" data-modal-tab="info">Fiche client</button>
-                        <button class="co-tab ${state.activeModalTab === 'checklist' ? 'active' : ''}" data-modal-tab="checklist">Pièces</button>
-                        <button class="co-tab ${state.activeModalTab === 'appointment' ? 'active' : ''}" data-modal-tab="appointment">Rendez-vous</button>
+                        <button class="co-tab ${state.activeModalTab === 'appointment' ? 'active' : ''}" data-modal-tab="appointment">${canCoordinate(d) ? '① ' : ''}Rendez-vous</button>
+                        <button class="co-tab ${state.activeModalTab === 'checklist' ? 'active' : ''}" data-modal-tab="checklist">${canCoordinate(d) ? '② ' : ''}Pièces</button>
                         <button class="co-tab ${state.activeModalTab === 'history' ? 'active' : ''}" data-modal-tab="history">Historique</button>
                     </div>
 
@@ -562,24 +579,32 @@
 
     function renderChecklistTab(checklist) {
         const d = state.currentDossier.dossier;
-        const coordStage = ['assigned','appointment_set','rejected'].includes(d.status);
-        const canCoord = canCoordinate(d) && coordStage;
+        const isCoordinator = canCoordinate(d);
+        const beforeAppointment = isCoordinator && ['assigned','rejected'].includes(d.status);
+        const canCoord = isCoordinator && d.status === 'appointment_set';
         const canBO = (state.currentUser.is_backoffice || state.currentUser.is_rcoordinateur) && d.status === 'collected';
         const showScans = !!state.currentDossier.can_view_scans;
         const mandatory = checklist.filter(x => x.is_mandatory);
         const field = canBO ? 'backoffice_checked' : 'coordinator_checked';
         const done = mandatory.filter(x => x[field]).length;
         const scanned = mandatory.filter(x => x.scan_count > 0).length;
-        return `<div class="co-mobile-checklist"><div class="co-checklist-progress" role="status">${done} / ${mandatory.length} pièces obligatoires vérifiées</div>
-          ${showScans ? `<div class="co-scan-progress">📎 ${scanned} / ${mandatory.length} pièces obligatoires scannées${state.scanRequired ? ' · <strong>scan obligatoire avant transmission</strong>' : ''}</div>` : ''}
-          ${checklist.map(item => `<section class="co-piece-card" id="piece-${Number(item.id)}">
+        const step = beforeAppointment
+            ? `<div class="co-step-banner is-blocked" role="note"><strong>Étape 1 : fixez d’abord le rendez-vous.</strong><span>Les pièces se scannent puis se valident une fois le RDV enregistré.</span><button type="button" class="co-btn co-btn-primary" data-goto-tab="appointment">📅 Prendre rendez-vous</button></div>`
+            : canCoord ? `<div class="co-step-banner" role="note"><strong>Étape 2 : pour chaque pièce, 📷 scannez puis ✅ validez.</strong><span>La case « Valider » s’active après l’envoi du scan.</span></div>` : '';
+        return `<div class="co-mobile-checklist">${step}
+          <div class="co-checklist-progress" role="status">${showScans ? `📎 ${scanned} / ${mandatory.length} scannées · ` : ''}✅ ${done} / ${mandatory.length} ${canBO ? 'conformes' : 'validées'}</div>
+          ${checklist.map(item => {
+            const hasScan = item.scan_count > 0;
+            const coordEnabled = canCoord && (hasScan || item.coordinator_checked);
+            return `<section class="co-piece-card ${hasScan ? 'is-scanned' : ''} ${item.coordinator_checked ? 'is-validated' : ''}" id="piece-${Number(item.id)}">
             <div class="co-piece-heading"><strong>${escapeHtml(item.document_label_fr)}</strong><span class="co-piece-required">${item.is_mandatory ? 'Obligatoire' : 'Facultatif'}</span></div>
             <div class="co-arabic" lang="ar" dir="rtl">${escapeHtml(item.document_label_ar)}</div>
+            ${showScans && (!beforeAppointment || (item.scans || []).length) ? renderPieceScans(d, item, canCoord) : ''}
             <div class="co-piece-checks">
-             <label><input type="checkbox" class="chk-item" data-id="${Number(item.id)}" data-role="coordinator" ${item.coordinator_checked ? 'checked' : ''} ${canCoord ? '' : 'disabled'}><span>Vérifié par le coordinateur</span></label>
+             <label class="${canCoord && !hasScan && !item.coordinator_checked ? 'is-waiting' : ''}"><input type="checkbox" class="chk-item" data-id="${Number(item.id)}" data-role="coordinator" ${item.coordinator_checked ? 'checked' : ''} ${coordEnabled ? '' : 'disabled'}><span>${canCoord && !hasScan && !item.coordinator_checked ? 'Valider (après le scan)' : 'Validée par le coordinateur'}</span></label>
              <label><input type="checkbox" class="chk-item" data-id="${Number(item.id)}" data-role="backoffice" ${item.backoffice_checked ? 'checked' : ''} ${canBO ? '' : 'disabled'}><span>Conforme · Back-Office</span></label>
-            </div>
-            ${showScans ? renderPieceScans(d, item, canCoord) : ''}</section>`).join('')}
+            </div></section>`;
+          }).join('')}
             ${checklist.length ? '' : '<p class="co-empty">Checklist indisponible : contactez le responsable avant de transmettre le dossier.</p>'}</div>`;
     }
 
@@ -607,7 +632,7 @@
                     ${canDelete ? `<button type="button" class="co-btn co-btn-danger co-btn-sm btn-scan-delete" data-scan="${Number(sc.id)}" aria-label="Supprimer le scan ${i + 1}">🗑️</button>` : ''}
                 </div></div>`;
         }).join('');
-        const empty = !scans.length && !session ? `<div class="co-scan-empty">${canScan ? (item.coordinator_checked ? '⚠️ Pièce vérifiée mais pas encore scannée.' : 'Aucun scan pour le moment.') : 'Aucun scan transmis.'}</div>` : '';
+        const empty = !scans.length && !session ? `<div class="co-scan-empty">${canScan ? 'À scanner : photographiez la pièce (recto, puis verso si besoin).' : 'Aucun scan transmis.'}</div>` : '';
         let actions = '';
         if (canScan && session) {
             actions = `<div class="co-scan-session" aria-label="Scan en cours">
@@ -773,21 +798,19 @@
     }
 
     function renderNextStep(d) {
-        const canCoord = canCoordinate(d);
-        if (!canCoord) {
-            return '';
+        if (!canCoordinate(d)) return '';
+        const beforeAppointment = ['assigned','rejected'].includes(d.status);
+        if (state.activeModalTab === 'appointment' && d.status === 'appointment_set') {
+            return `<button class="co-btn co-btn-primary" data-goto-tab="checklist">Suivant&nbsp;: scanner les pièces →</button>`;
         }
-
-        if (state.activeModalTab === 'checklist') {
-            return `<button class="co-btn co-btn-primary" id="btn-next-step" data-next="appointment">Suivant&nbsp;: prendre rendez-vous →</button>`;
+        if (state.activeModalTab === 'checklist' && beforeAppointment) {
+            return `<button class="co-btn co-btn-primary" data-goto-tab="appointment">← Prendre rendez-vous</button>`;
         }
-
-        if (state.activeModalTab === 'appointment' && (d.status === 'appointment_set' || d.status === 'assigned')) {
-            const list = state.currentDossier.checklist;
-            const hasDate = !!(d.appointment_date || '').trim() && !!(d.appointment_time || '').trim() && list.length > 0 && list.every(x => !x.is_mandatory || (x.coordinator_checked && (!state.scanRequired || x.scan_count > 0)));
-            return `<button class="co-btn co-btn-primary" id="btn-action-collected" data-id="${d.id}" ${hasDate ? '' : 'disabled'} title="${state.scanRequired ? 'Rendez-vous, pièces vérifiées et scannées requis' : 'Renseignez d\'abord la date du rendez-vous'}">Suivant&nbsp;: dossier récupéré → envoyer au Back-Office</button>`;
+        if (state.activeModalTab === 'checklist' && d.status === 'appointment_set') {
+            const list = state.currentDossier.checklist || [];
+            const ready = list.length > 0 && list.every(x => !x.is_mandatory || (x.coordinator_checked && x.scan_count > 0));
+            return `<button class="co-btn co-btn-success" id="btn-action-collected" data-id="${d.id}" ${ready ? '' : 'disabled'} title="Toutes les pièces obligatoires doivent être scannées et validées">📤 Transmettre au Back-Office</button>`;
         }
-
         return '';
     }
 
@@ -1289,13 +1312,15 @@
             });
         });
 
-        const nextStepBtn = document.getElementById('btn-next-step');
-        if (nextStepBtn) {
-            nextStepBtn.addEventListener('click', (e) => {
-                state.activeModalTab = e.currentTarget.getAttribute('data-next');
-                render();
-            });
-        }
+        document.querySelectorAll('[data-goto-tab]').forEach(btn => btn.addEventListener('click', (e) => {
+            if (scanSession && scanSession.pages.length && !confirm('Abandonner le scan en cours (pages non envoyées) ?')) return;
+            if (state.dirty && !confirm('Changer d’onglet sans enregistrer vos modifications ?')) return;
+            clearScanSession();
+            state.dirty = false;
+            state.activeModalTab = e.currentTarget.getAttribute('data-goto-tab');
+            render();
+            document.querySelector('.co-modal-body')?.scrollTo(0, 0);
+        }));
 
         const submitNew = document.getElementById('btn-submit-new-dossier');
         if (submitNew) {
@@ -1384,9 +1409,8 @@
 
                 e.target.disabled = false;
                 if (!res.success) {
-                    feedback(res.error || 'Enregistrement impossible.');
                     e.target.checked = !checked;
-                    alert('Enregistrement impossible : ' + (res.error || 'erreur inconnue'));
+                    feedback('Enregistrement impossible : ' + (res.error || 'erreur inconnue'));
                     return;
                 }
 
@@ -1395,17 +1419,8 @@
                     if (role === 'coordinator') item.coordinator_checked = checked ? 1 : 0;
                     if (role === 'backoffice') item.backoffice_checked = checked ? 1 : 0;
                 }
-                const mandatory = (state.currentDossier.checklist || []).filter(x => x.is_mandatory);
-                const field = state.currentDossier.dossier.status === 'collected' ? 'backoffice_checked' : 'coordinator_checked';
-                const done = mandatory.filter(x => x[field]).length;
-                const progress = document.querySelector('.co-checklist-progress'); if (progress) progress.textContent = `${done} / ${mandatory.length} pièces obligatoires vérifiées`;
-                const validate = document.getElementById('btn-action-validate-bo'); if (validate) validate.disabled = !state.currentDossier.checklist.length || done !== mandatory.length;
-                const needsScan = role === 'coordinator' && checked && state.currentDossier.can_view_scans && item && !item.scan_count;
-                feedback(needsScan ? 'Pièce enregistrée. Scannez-la maintenant avec « 📷 Scanner » sous cette pièce.' : 'Pièce enregistrée.',false);
-                if (needsScan) {
-                    const card = document.getElementById('piece-' + itemId);
-                    if (card) { card.classList.add('co-piece-scan-hint'); card.querySelector('.co-scans')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
-                }
+                render();
+                feedback(checked ? (role === 'coordinator' ? '✅ Pièce validée.' : '✅ Pièce conforme.') : 'Pièce remise « à vérifier ».', false);
             });
         });
 
@@ -1426,11 +1441,14 @@
                 });
 
                 if (res.success) {
-                    alert('Rendez-vous enregistré ! Le statut passe à "RDV Fixé".');
+                    state.dirty = false;
+                    state.activeModalTab = 'checklist';
                     await openDossierDetail(dossierId);
-                    await loadDossiers();
+                    document.querySelector('.co-modal-body')?.scrollTo(0, 0);
+                    feedback('📅 Rendez-vous enregistré. Étape 2 : scannez puis validez chaque pièce.', false);
+                    loadDossiers().then(() => { if (!state.modal) render(); });
                 } else {
-                    alert('Erreur: ' + res.error);
+                    feedback('Rendez-vous non enregistré : ' + (res.error || 'erreur inconnue'));
                 }
             });
         }
@@ -1561,7 +1579,9 @@
         }
         clearScanSession();
         await openDossierDetail(dossierId);
-        feedback('✅ Scan PDF enregistré. Le Back-Office peut le consulter.', false);
+        const card = document.getElementById('piece-' + itemId);
+        if (card) { card.classList.add('co-piece-scan-hint'); card.querySelector('.co-piece-checks')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+        feedback('📎 Scan enregistré. Cochez « Validée par le coordinateur » pour valider la pièce.', false);
         return true;
     }
 
