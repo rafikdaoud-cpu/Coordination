@@ -789,3 +789,8 @@ html.co-android { --header-height: 0px !important; }
 html.co-android #header, html.co-android header#header, html.co-android .header-start, html.co-android #skip-actions { display: none !important; }
 html.co-android #content, html.co-android #content-vue, html.co-android .content { margin-top: 0 !important; padding-top: 0 !important; top: 0 !important; }
 html.co-android #coord-app-root .co-logout { text-decoration: none; display: inline-flex; align-items: center; min-height: 44px; }
+
+/* Nextcloud 28+ : #content a une hauteur fixe et coupe ce qui dépasse (overflow: clip).
+   L'application défile donc elle-même (souris, molette, doigt), sans écraser ses blocs. */
+#coord-app-root.coord-app { height: 100%; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+#coord-app-root.coord-app > * { flex-shrink: 0; }

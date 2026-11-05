@@ -43,7 +43,7 @@ with sync_playwright() as p:
    # worker. La CSP stricte des pages Nextcloud (sans unsafe-eval) est vérifiée par tests/browser-opencv.py.
    csp="default-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; media-src 'self' blob:"
    for js in ['js/vendor/opencv.js','js/docscan-worker.js','js/docscan.js']:page.route('https://coordination.test/'+js,static(js))
-   page.route('https://coordination.test/',lambda r:r.fulfill(content_type='text/html',headers={'Content-Security-Policy':csp},body='<!doctype html><html lang="fr"><meta name="viewport" content="width=device-width,initial-scale=1"><body style="margin:0"><div id="coord-app-root" class="coord-app"></div></body></html>'))
+   page.route('https://coordination.test/',lambda r:r.fulfill(content_type='text/html',headers={'Content-Security-Policy':csp},body='<!doctype html><html lang="fr"><meta name="viewport" content="width=device-width,initial-scale=1"><body style="margin:0;height:100vh;overflow:hidden"><main id="content" class="app-coordination" style="position:fixed;top:50px;left:8px;width:calc(100% - 16px);height:calc(100% - 58px);display:flex;overflow:clip;box-sizing:border-box"><div id="coord-app-root" class="coord-app"></div></main></body></html>'))
    page.goto('https://coordination.test/')
    page.add_style_tag(content=(root/'css/app.css').read_text())
    page.evaluate('''role=>{
@@ -71,6 +71,14 @@ with sync_playwright() as p:
    page.locator('.co-table tbody tr').first.wait_for()
    assert not page.evaluate('window.xss') and page.locator('#coord-app-root img').count()==0,'coordinator display name injected HTML'
    assert page.locator('.co-table tbody tr').count()==15
+   # Comme Nextcloud 35 : #content a une hauteur fixe et coupe ce qui dépasse ; l'application doit défiler elle-même.
+   app=page.locator('#coord-app-root')
+   assert app.evaluate('e=>e.scrollHeight>e.clientHeight+100'),'first page content not scrollable'
+   page.mouse.move(150,300);page.mouse.wheel(0,4000);page.wait_for_timeout(300)
+   assert app.evaluate('e=>e.scrollTop>100'),'wheel/touch scrolling does not move the first page'
+   app.evaluate('e=>e.scrollTop=e.scrollHeight')
+   assert page.locator('.co-table tbody tr').last.evaluate('e=>{const r=e.getBoundingClientRect();return r.top<innerHeight&&r.bottom>0}'),('cannot scroll to the last row',app.evaluate('e=>[e.scrollTop,e.scrollHeight,e.clientHeight]'),page.locator('.co-table tbody tr').last.evaluate('e=>JSON.stringify(e.getBoundingClientRect())'))
+   app.evaluate('e=>e.scrollTop=0')
    search=page.query_selector('#search-input');search.fill('Client')
    page.wait_for_function('e=>!e.isConnected',arg=search)
    assert page.locator('#search-input').evaluate('e=>e===document.activeElement && e.value==="Client"'),'search loses mobile keyboard focus'
